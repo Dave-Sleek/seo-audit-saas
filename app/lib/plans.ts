@@ -23,6 +23,7 @@ export type PublicPlan = Pick<
   | "aiRecommendationLimit"
   | "maxProjects"
   | "isFeatured"
+  | "paystackPlanCode"
 >;
 
 /* =========================================================
@@ -48,6 +49,7 @@ export async function getActivePlans(): Promise<PublicPlan[]> {
       aiRecommendationLimit: plans.aiRecommendationLimit,
       maxProjects: plans.maxProjects,
       isFeatured: plans.isFeatured,
+      paystackPlanCode: plans.paystackPlanCode,
     })
     .from(plans)
     .where(eq(plans.isActive, true))
@@ -77,6 +79,7 @@ export async function getActivePlanBySlug(
       aiRecommendationLimit: plans.aiRecommendationLimit,
       maxProjects: plans.maxProjects,
       isFeatured: plans.isFeatured,
+      paystackPlanCode: plans.paystackPlanCode,
     })
     .from(plans)
     .where(and(eq(plans.slug, slug), eq(plans.isActive, true)))

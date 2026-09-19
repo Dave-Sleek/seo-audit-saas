@@ -32,6 +32,14 @@ export function formatPlanPrice(plan: PublicPlan): string {
   }).format(amount);
 }
 
+// export function formatPlanPrice(plan: PublicPlan): string {
+//   return new Intl.NumberFormat("en-NG", {
+//     style: "currency",
+//     currency: plan.currency,
+//     minimumFractionDigits: 0,
+//     maximumFractionDigits: 0,
+//   }).format(plan.price);
+// }
 /**
  * Returns the suffix shown next to the price.
  * Falls back gracefully for unknown intervals.

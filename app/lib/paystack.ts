@@ -1,3 +1,5 @@
+//Paystack.ts
+
 import crypto from "crypto";
 
 const PAYSTACK_BASE_URL =
@@ -334,6 +336,82 @@ export async function verifyTransaction(
   );
 }
 
+
+
+/**
+ * ============================================================
+ * CREATE PAYSTACK PLAN
+ * ============================================================
+ */
+
+      export type CreatePaystackPlanParams = {
+        name: string;
+        amount: number;
+        interval:
+          | "daily"
+          | "weekly"
+          | "monthly"
+          | "quarterly"
+          | "biannually"
+          | "annually";
+        currency?: string;
+        description?: string;
+      };
+
+      export type CreatePaystackPlanResponse = {
+        status: boolean;
+        message: string;
+
+        data: {
+          name: string;
+          plan_code: string;
+          amount: number;
+          interval: string;
+          currency: string;
+          description?: string;
+          id: number;
+        };
+      };
+
+      export async function createPaystackPlan(
+        params: CreatePaystackPlanParams
+      ): Promise<CreatePaystackPlanResponse> {
+        if (!params.name.trim()) {
+          throw new Error(
+            "Paystack plan name is required."
+          );
+        }
+
+        if (
+          !Number.isInteger(params.amount) ||
+          params.amount <= 0
+        ) {
+          throw new Error(
+            "Paystack plan amount must be a positive integer."
+          );
+        }
+
+        const body: Record<string, unknown> = {
+          name: params.name.trim(),
+          amount: params.amount,
+          interval: params.interval,
+          currency: params.currency || "NGN",
+        };
+
+        if (params.description?.trim()) {
+          body.description =
+            params.description.trim();
+        }
+
+        return paystackRequest<CreatePaystackPlanResponse>(
+          "/plan",
+          {
+            method: "POST",
+            body: JSON.stringify(body),
+          }
+        );
+      }
+
 /**
  * ============================================================
  * WEBHOOK SIGNATURE VERIFICATION
@@ -417,24 +495,33 @@ export type ValidatePaymentParams = {
   paystackStatus: string;
 };
 
-export function validatePaystackPayment(
-  params: ValidatePaymentParams
-): void {
-  if (
-    params.paystackStatus !==
-    "success"
-  ) {
+export function validatePaystackPayment(params: {
+  paystackAmount: number | string;
+  expectedAmount: number | string;
+  paystackCurrency: string;
+  expectedCurrency: string;
+  paystackStatus: string;
+}): void {
+  if (params.paystackStatus !== "success") {
     throw new Error(
       `Paystack transaction is not successful. Status: ${params.paystackStatus}`
     );
   }
 
-  if (
-    params.paystackAmount !==
-    params.expectedAmount
-  ) {
+  /*
+   * payments.amount is numeric(12,2) in the DB, so Drizzle returns
+   * it as a string like "500000.00".
+   *
+   * Paystack returns amount as an integer like 500000.
+   *
+   * Normalize both to integers before comparing.
+   */
+  const actual = Math.round(Number(params.paystackAmount));
+  const expected = Math.round(Number(params.expectedAmount));
+
+  if (actual !== expected) {
     throw new Error(
-      "Paystack payment amount does not match the expected amount."
+      `Paystack amount ${actual} does not match expected ${expected}.`
     );
   }
 

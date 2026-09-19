@@ -33,9 +33,7 @@ export const ACTIVE_SUBSCRIPTION_STATUSES = [
  * ---------------------------------------------------------
  */
 
-export async function getPlanById(
-  planId: string
-) {
+export async function getPlanById(planId: string) {
   const [plan] = await db
     .select()
     .from(plans)
@@ -58,17 +56,11 @@ export async function expireUserSubscriptions(
 
   await db
     .update(subscriptions)
-    .set({
-      status: "expired",
-      updatedAt: now,
-    })
+    .set({ status: "expired", updatedAt: now })
     .where(
       and(
         eq(subscriptions.userId, userId),
-        inArray(
-          subscriptions.status,
-          ACTIVE_SUBSCRIPTION_STATUSES
-        ),
+        inArray(subscriptions.status, ACTIVE_SUBSCRIPTION_STATUSES),
         lte(subscriptions.endsAt, now)
       )
     );
@@ -77,9 +69,8 @@ export async function expireUserSubscriptions(
 /*
  * ---------------------------------------------------------
  * Expire all subscriptions whose end date has passed.
+ * Can be called by a cron job.
  * ---------------------------------------------------------
- *
- * This can later be called by a cron job.
  */
 
 export async function expireExpiredSubscriptions(): Promise<void> {
@@ -87,16 +78,10 @@ export async function expireExpiredSubscriptions(): Promise<void> {
 
   await db
     .update(subscriptions)
-    .set({
-      status: "expired",
-      updatedAt: now,
-    })
+    .set({ status: "expired", updatedAt: now })
     .where(
       and(
-        inArray(
-          subscriptions.status,
-          ACTIVE_SUBSCRIPTION_STATUSES
-        ),
+        inArray(subscriptions.status, ACTIVE_SUBSCRIPTION_STATUSES),
         lte(subscriptions.endsAt, now)
       )
     );
@@ -108,15 +93,10 @@ export async function expireExpiredSubscriptions(): Promise<void> {
  * ---------------------------------------------------------
  */
 
-export async function getActiveSubscription(
-  userId: string
-) {
+export async function getActiveSubscription(userId: string) {
   const now = new Date();
 
-  /*
-   * First expire any subscriptions that have already ended.
-   */
-
+  // First expire anything that's already ended.
   await expireUserSubscriptions(userId);
 
   const [subscription] = await db
@@ -125,23 +105,15 @@ export async function getActiveSubscription(
       plan: plans,
     })
     .from(subscriptions)
-    .innerJoin(
-      plans,
-      eq(subscriptions.planId, plans.id)
-    )
+    .innerJoin(plans, eq(subscriptions.planId, plans.id))
     .where(
       and(
         eq(subscriptions.userId, userId),
-        inArray(
-          subscriptions.status,
-          ACTIVE_SUBSCRIPTION_STATUSES
-        ),
+        inArray(subscriptions.status, ACTIVE_SUBSCRIPTION_STATUSES),
         gt(subscriptions.endsAt, now)
       )
     )
-    .orderBy(
-      desc(subscriptions.endsAt)
-    )
+    .orderBy(desc(subscriptions.endsAt))
     .limit(1);
 
   if (!subscription) {
@@ -157,11 +129,8 @@ export async function getActiveSubscription(
  * ---------------------------------------------------------
  */
 
-export async function getUserSubscription(
-  userId: string
-) {
+export async function getUserSubscription(userId: string) {
   const result = await getActiveSubscription(userId);
-
   return result?.subscription ?? null;
 }
 
@@ -179,50 +148,33 @@ export function calculateEndDate(
 
   switch (interval.toLowerCase()) {
     case "daily":
-      endDate.setDate(
-        endDate.getDate() + 1
-      );
+      endDate.setDate(endDate.getDate() + 1);
       break;
 
     case "weekly":
-      endDate.setDate(
-        endDate.getDate() + 7
-      );
+      endDate.setDate(endDate.getDate() + 7);
       break;
 
     case "monthly":
-      endDate.setMonth(
-        endDate.getMonth() + 1
-      );
+      endDate.setMonth(endDate.getMonth() + 1);
       break;
 
     case "quarterly":
-      endDate.setMonth(
-        endDate.getMonth() + 3
-      );
+      endDate.setMonth(endDate.getMonth() + 3);
       break;
 
     case "biannual":
     case "semiannual":
-      endDate.setMonth(
-        endDate.getMonth() + 6
-      );
+      endDate.setMonth(endDate.getMonth() + 6);
       break;
 
     case "annual":
     case "yearly":
-      endDate.setFullYear(
-        endDate.getFullYear() + 1
-      );
+      endDate.setFullYear(endDate.getFullYear() + 1);
       break;
 
     default:
-      /*
-       * Default paid subscription interval.
-       */
-      endDate.setMonth(
-        endDate.getMonth() + 1
-      );
+      endDate.setMonth(endDate.getMonth() + 1);
       break;
   }
 
@@ -236,7 +188,9 @@ export function calculateEndDate(
  */
 
 async function createUsagePeriod(
-  tx: any,
+  tx: Parameters<
+    Parameters<typeof db.transaction>[0]
+  >[0],
   subscriptionId: string,
   userId: string,
   periodStart: Date,
@@ -261,38 +215,38 @@ async function createUsagePeriod(
 
 /*
  * ---------------------------------------------------------
+ * Extract plan ID from a payment row.
+ *
+ * Our payments table does not have a plan_id column, so the
+ * plan is stored inside metadata.planId.
+ * ---------------------------------------------------------
+ */
+
+function extractPlanIdFromPayment(
+  payment: typeof payments.$inferSelect
+): string | null {
+  const metadata = payment.metadata as
+    | { planId?: string }
+    | null
+    | undefined;
+
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+
+  return typeof metadata.planId === "string" ? metadata.planId : null;
+}
+
+/*
+ * ---------------------------------------------------------
  * Activate subscription
  * ---------------------------------------------------------
  *
- * THIS IS THE IMPORTANT IDEMPOTENCY LAYER.
+ * Idempotent and concurrency-safe.
  *
- * Callback and webhook can arrive at exactly the same time.
- *
- * We lock the payment row inside the transaction:
- *
- * SELECT ... FOR UPDATE
- *
- * This means:
- *
- * Request A
- *    ↓
- * locks payment
- *    ↓
- * creates subscription
- *    ↓
- * links payment
- *    ↓
- * commits
- *
- * Request B
- *    ↓
- * waits for payment lock
- *    ↓
- * sees subscriptionId
- *    ↓
- * returns existing subscription
- *
- * Therefore only ONE subscription can be created.
+ * Callback and webhook can arrive at the same time.
+ * We lock the payment row inside the transaction
+ * (SELECT ... FOR UPDATE) so only one creates the subscription.
  * ---------------------------------------------------------
  */
 
@@ -303,368 +257,270 @@ export async function activateSubscription({
   paymentId: string;
   userId: string;
 }) {
-  return await db.transaction(
-    async (tx) => {
-      /*
-       * -------------------------------------------------------
-       * 1. Lock payment row
-       * -------------------------------------------------------
-       *
-       * FOR UPDATE prevents callback + webhook from processing
-       * the same payment concurrently.
-       */
+  return await db.transaction(async (tx) => {
+    /*
+     * -------------------------------------------------------
+     * 1. Lock payment row
+     * -------------------------------------------------------
+     */
 
-      const lockedPayments = await tx
-        .select()
-        .from(payments)
-        .where(
-          and(
-            eq(payments.id, paymentId),
-            eq(payments.userId, userId)
-          )
+    const lockedPayments = await tx
+      .select()
+      .from(payments)
+      .where(
+        and(
+          eq(payments.id, paymentId),
+          eq(payments.userId, userId)
         )
-        .for("update");
+      )
+      .for("update");
 
-      const payment =
-        lockedPayments[0];
+    const payment = lockedPayments[0];
 
-      if (!payment) {
-        throw new Error(
-          "PAYMENT_NOT_FOUND"
-        );
-      }
+    if (!payment) {
+      throw new Error("PAYMENT_NOT_FOUND");
+    }
 
-      /*
-       * -------------------------------------------------------
-       * 2. Already activated?
-       * -------------------------------------------------------
-       *
-       * This is the primary idempotency check.
-       */
+    /*
+     * -------------------------------------------------------
+     * 2. Already activated?
+     * -------------------------------------------------------
+     */
 
-      if (payment.subscriptionId) {
-        const [existingSubscription] =
-          await tx
-            .select()
-            .from(subscriptions)
-            .where(
-              eq(
-                subscriptions.id,
-                payment.subscriptionId
-              )
-            )
-            .limit(1);
-
-        if (existingSubscription) {
-          return existingSubscription;
-        }
-
-        /*
-         * Extremely unusual case:
-         *
-         * payment.subscriptionId exists but the subscription
-         * row doesn't.
-         *
-         * Because both are supposed to be created in the same
-         * transaction, this should not normally happen.
-         *
-         * We stop rather than creating a duplicate.
-         */
-
-        throw new Error(
-          "PAYMENT_SUBSCRIPTION_REFERENCE_INVALID"
-        );
-      }
-
-      /*
-       * -------------------------------------------------------
-       * 3. Payment must be successful
-       * -------------------------------------------------------
-       */
-
-      if (payment.status !== "success") {
-        throw new Error(
-          "PAYMENT_NOT_SUCCESSFUL"
-        );
-      }
-
-      /*
-       * -------------------------------------------------------
-       * 4. Load plan
-       * -------------------------------------------------------
-       */
-
-      const [plan] = await tx
+    if (payment.subscriptionId) {
+      const [existingSubscription] = await tx
         .select()
-        .from(plans)
-        .where(
-          eq(plans.id, payment.planId)
-        )
+        .from(subscriptions)
+        .where(eq(subscriptions.id, payment.subscriptionId))
         .limit(1);
 
-      if (!plan) {
-        throw new Error(
-          "PLAN_NOT_FOUND"
-        );
+      if (existingSubscription) {
+        return existingSubscription;
       }
 
-      if (!plan.isActive) {
-        throw new Error(
-          "PLAN_NOT_ACTIVE"
-        );
-      }
+      throw new Error(
+        "PAYMENT_SUBSCRIPTION_REFERENCE_INVALID"
+      );
+    }
 
-      /*
-       * -------------------------------------------------------
-       * 5. Validate payment amount against plan
-       * -------------------------------------------------------
-       *
-       * The payment amount must match the plan price stored in
-       * our database.
-       */
+    /*
+     * -------------------------------------------------------
+     * 3. Payment must be successful
+     *
+     * DB check constraint allows:
+     *   pending | successful | failed | refunded
+     * -------------------------------------------------------
+     */
 
-      if (
-        Number(payment.amount) !==
-        Number(plan.price)
-      ) {
-        throw new Error(
-          "PAYMENT_PLAN_AMOUNT_MISMATCH"
-        );
-      }
+    if (payment.status !== "successful") {
+      throw new Error("PAYMENT_NOT_SUCCESSFUL");
+    }
 
-      /*
-       * -------------------------------------------------------
-       * 6. Find current active subscription
-       * -------------------------------------------------------
-       *
-       * Expire old subscriptions first.
-       */
+    /*
+     * -------------------------------------------------------
+     * 4. Extract plan ID from metadata
+     *
+     * payments has no plan_id column — the plan is inside
+     * metadata.planId (set by the initialize route).
+     * -------------------------------------------------------
+     */
 
-      const now = new Date();
+    const planId = extractPlanIdFromPayment(payment);
 
-      await tx
-        .update(subscriptions)
-        .set({
-          status: "expired",
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(
-              subscriptions.userId,
-              userId
-            ),
-            inArray(
-              subscriptions.status,
-              ACTIVE_SUBSCRIPTION_STATUSES
-            ),
-            lte(
-              subscriptions.endsAt,
-              now
-            )
-          )
-        );
+    if (!planId) {
+      throw new Error("PAYMENT_MISSING_PLAN_METADATA");
+    }
 
-      const [existingActiveSubscription] =
-        await tx
-          .select()
-          .from(subscriptions)
-          .where(
-            and(
-              eq(
-                subscriptions.userId,
-                userId
-              ),
-              inArray(
-                subscriptions.status,
-                ACTIVE_SUBSCRIPTION_STATUSES
-              ),
-              gt(
-                subscriptions.endsAt,
-                now
-              )
-            )
-          )
-          .orderBy(
-            desc(subscriptions.endsAt)
-          )
-          .limit(1);
+    /*
+     * -------------------------------------------------------
+     * 5. Load plan
+     * -------------------------------------------------------
+     */
 
-      /*
-       * -------------------------------------------------------
-       * 7. Determine subscription start date
-       * -------------------------------------------------------
-       *
-       * If the user already has an active subscription, the
-       * new subscription starts after the existing subscription
-       * ends.
-       *
-       * Otherwise it starts immediately.
-       */
+    const [plan] = await tx
+      .select()
+      .from(plans)
+      .where(eq(plans.id, planId))
+      .limit(1);
 
-      const startsAt =
-        existingActiveSubscription
-          ? new Date(
-              existingActiveSubscription.endsAt
-            )
-          : now;
+    if (!plan) {
+      throw new Error("PLAN_NOT_FOUND");
+    }
 
-      const endsAt =
-        calculateEndDate(
-          startsAt,
-          plan.interval
-        );
+    if (!plan.isActive) {
+      throw new Error("PLAN_NOT_ACTIVE");
+    }
 
-      /*
-       * -------------------------------------------------------
-       * 8. Create subscription
-       * -------------------------------------------------------
-       */
+    /*
+     * -------------------------------------------------------
+     * 6. Validate payment amount matches plan price
+     * -------------------------------------------------------
+     *
+     * payment.amount is numeric(12,2) — comes back as a string
+     * plan.price is integer (kobo)
+     *
+     * Normalize both to integers before comparing.
+     * -------------------------------------------------------
+     */
 
-      const [newSubscription] =
-        await tx
-          .insert(subscriptions)
-          .values({
-            userId,
-            planId: plan.id,
-            status: "active",
-            startsAt,
-            endsAt,
-          })
-          .returning();
+    const paymentAmount = Math.round(Number(payment.amount));
+    const planPrice = Math.round(Number(plan.price));
 
-      if (!newSubscription) {
-        throw new Error(
-          "SUBSCRIPTION_CREATION_FAILED"
-        );
-      }
+    if (paymentAmount !== planPrice) {
+      throw new Error("PAYMENT_PLAN_AMOUNT_MISMATCH");
+    }
 
-      /*
-       * -------------------------------------------------------
-       * 9. Create usage period
-       * -------------------------------------------------------
-       */
+    /*
+     * -------------------------------------------------------
+     * 7. Expire old subscriptions
+     * -------------------------------------------------------
+     */
 
-      await createUsagePeriod(
-        tx,
-        newSubscription.id,
-        userId,
-        startsAt,
-        endsAt
+    const now = new Date();
+
+    await tx
+      .update(subscriptions)
+      .set({ status: "expired", updatedAt: now })
+      .where(
+        and(
+          eq(subscriptions.userId, userId),
+          inArray(subscriptions.status, ACTIVE_SUBSCRIPTION_STATUSES),
+          lte(subscriptions.endsAt, now)
+        )
       );
 
-      /*
-       * -------------------------------------------------------
-       * 10. Link payment to subscription
-       * -------------------------------------------------------
-       */
+    /*
+     * -------------------------------------------------------
+     * 8. Find existing active subscription (for stacking)
+     * -------------------------------------------------------
+     */
 
-      const [linkedPayment] =
-        await tx
-          .update(payments)
-          .set({
-            subscriptionId:
-              newSubscription.id,
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(
-                payments.id,
-                payment.id
-              ),
-              eq(
-                payments.userId,
-                userId
-              ),
-              sql`${payments.subscriptionId} IS NULL`
-            )
-          )
-          .returning();
+    const [existingActiveSubscription] = await tx
+      .select()
+      .from(subscriptions)
+      .where(
+        and(
+          eq(subscriptions.userId, userId),
+          inArray(subscriptions.status, ACTIVE_SUBSCRIPTION_STATUSES),
+          gt(subscriptions.endsAt, now)
+        )
+      )
+      .orderBy(desc(subscriptions.endsAt))
+      .limit(1);
 
-      /*
-       * -------------------------------------------------------
-       * 11. Verify that this transaction successfully claimed
-       *     the payment.
-       * -------------------------------------------------------
-       */
+    /*
+     * -------------------------------------------------------
+     * 9. Determine start date
+     *
+     * If user already has an active subscription, the new
+     * one stacks on top of it.
+     * -------------------------------------------------------
+     */
 
-      if (!linkedPayment) {
-        /*
-         * This should never happen because the payment row is
-         * locked, but we fail safely if it does.
-         */
+    const startsAt = existingActiveSubscription
+      ? new Date(existingActiveSubscription.endsAt)
+      : now;
 
-        throw new Error(
-          "PAYMENT_ALREADY_LINKED"
-        );
-      }
+    const endsAt = calculateEndDate(startsAt, plan.interval);
 
-      /*
-       * -------------------------------------------------------
-       * 12. Return created subscription
-       * -------------------------------------------------------
-       */
+    /*
+     * -------------------------------------------------------
+     * 10. Create subscription
+     * -------------------------------------------------------
+     */
 
-      return newSubscription;
+    const [newSubscription] = await tx
+      .insert(subscriptions)
+      .values({
+        userId,
+        planId: plan.id,
+        status: "active",
+        startsAt,
+        endsAt,
+      })
+      .returning();
+
+    if (!newSubscription) {
+      throw new Error("SUBSCRIPTION_CREATION_FAILED");
     }
-  );
+
+    /*
+     * -------------------------------------------------------
+     * 11. Create usage period for the new subscription
+     * -------------------------------------------------------
+     */
+
+    await createUsagePeriod(
+      tx,
+      newSubscription.id,
+      userId,
+      startsAt,
+      endsAt
+    );
+
+    /*
+     * -------------------------------------------------------
+     * 12. Link payment to subscription
+     * -------------------------------------------------------
+     */
+
+    const [linkedPayment] = await tx
+      .update(payments)
+      .set({
+        subscriptionId: newSubscription.id,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(payments.id, payment.id),
+          eq(payments.userId, userId),
+          sql`${payments.subscriptionId} IS NULL`
+        )
+      )
+      .returning();
+
+    if (!linkedPayment) {
+      throw new Error("PAYMENT_ALREADY_LINKED");
+    }
+
+    return newSubscription;
+  });
 }
 
 /*
  * ---------------------------------------------------------
  * Cancel subscription locally
- * ---------------------------------------------------------
  *
- * This does not yet cancel the Paystack recurring profile.
- * Paystack cancellation will be implemented in the recurring
- * subscription management stage.
+ * Does not cancel the Paystack recurring profile yet.
  * ---------------------------------------------------------
  */
 
-export async function cancelSubscription(
-  userId: string
-) {
-  const [subscription] =
-    await db
-      .select()
-      .from(subscriptions)
-      .where(
-        and(
-          eq(
-            subscriptions.userId,
-            userId
-          ),
-          eq(
-            subscriptions.status,
-            "active"
-          )
-        )
+export async function cancelSubscription(userId: string) {
+  const [subscription] = await db
+    .select()
+    .from(subscriptions)
+    .where(
+      and(
+        eq(subscriptions.userId, userId),
+        eq(subscriptions.status, "active")
       )
-      .orderBy(
-        desc(subscriptions.endsAt)
-      )
-      .limit(1);
+    )
+    .orderBy(desc(subscriptions.endsAt))
+    .limit(1);
 
   if (!subscription) {
     return null;
   }
 
-  const [updatedSubscription] =
-    await db
-      .update(subscriptions)
-      .set({
-        status: "non_renewing",
-        cancelledAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(
-        eq(
-          subscriptions.id,
-          subscription.id
-        )
-      )
-      .returning();
+  const [updatedSubscription] = await db
+    .update(subscriptions)
+    .set({
+      status: "non_renewing",
+      cancelledAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(subscriptions.id, subscription.id))
+    .returning();
 
   return updatedSubscription ?? null;
 }
@@ -675,18 +531,9 @@ export async function cancelSubscription(
  * ---------------------------------------------------------
  */
 
-export async function getCurrentPlan(
-  userId: string
-) {
-  const activeSubscription =
-    await getActiveSubscription(
-      userId
-    );
-
-  return (
-    activeSubscription?.plan ??
-    null
-  );
+export async function getCurrentPlan(userId: string) {
+  const activeSubscription = await getActiveSubscription(userId);
+  return activeSubscription?.plan ?? null;
 }
 
 /*
@@ -698,12 +545,6 @@ export async function getCurrentPlan(
 export async function hasActiveSubscription(
   userId: string
 ): Promise<boolean> {
-  const activeSubscription =
-    await getActiveSubscription(
-      userId
-    );
-
-  return Boolean(
-    activeSubscription
-  );
+  const activeSubscription = await getActiveSubscription(userId);
+  return Boolean(activeSubscription);
 }

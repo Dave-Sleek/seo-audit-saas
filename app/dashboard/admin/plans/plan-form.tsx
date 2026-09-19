@@ -240,9 +240,11 @@ export default function PlanForm({ mode, initial }: Props) {
 
         <div className="grid gap-5 px-6 py-6 sm:grid-cols-2">
           <Field
-            label="Price (kobo)"
+          label="Price (naira)"
+            // label="Price (kobo)"
             required
-            hint={`₦${(Number(form.price) / 100).toLocaleString()} charged per period`}
+            hint={`₦${Number(form.price).toLocaleString("en-NG")} charged per period`}
+            // hint={`₦${(Number(form.price) / 100).toLocaleString()} charged per period`}
           >
             <input
               type="number"

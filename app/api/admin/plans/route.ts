@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
-import { asc } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 
 import { db } from "@/app/db";
 import { plans } from "@/app/db/schema";
 import { getCurrentUser } from "@/app/lib/auth";
+import {
+  createPaystackPlan,
+} from "@/app/lib/paystack";
 
 async function getAdmin() {
   const user = await getCurrentUser();
@@ -12,7 +15,10 @@ async function getAdmin() {
     return {
       user: null,
       response: NextResponse.json(
-        { error: "Authentication required." },
+        {
+          error:
+            "Authentication required.",
+        },
         { status: 401 }
       ),
     };
@@ -22,7 +28,10 @@ async function getAdmin() {
     return {
       user: null,
       response: NextResponse.json(
-        { error: "Administrator access required." },
+        {
+          error:
+            "Administrator access required.",
+        },
         { status: 403 }
       ),
     };
@@ -36,7 +45,8 @@ async function getAdmin() {
 
 export async function GET() {
   try {
-    const { response } = await getAdmin();
+    const { response } =
+      await getAdmin();
 
     if (response) {
       return response;
@@ -45,14 +55,19 @@ export async function GET() {
     const result = await db
       .select()
       .from(plans)
-      .orderBy(asc(plans.price));
+      .orderBy(
+        asc(plans.price)
+      );
 
     return NextResponse.json({
       success: true,
       plans: result,
     });
   } catch (error) {
-    console.error("Admin plans GET error:", error);
+    console.error(
+      "Admin plans GET error:",
+      error
+    );
 
     return NextResponse.json(
       {
@@ -66,18 +81,27 @@ export async function GET() {
   }
 }
 
-export async function POST(request: Request) {
+export async function POST(
+  request: Request
+) {
   try {
-    const { response } = await getAdmin();
+    const { response } =
+      await getAdmin();
 
     if (response) {
       return response;
     }
 
-    const body = await request.json();
+    const body =
+      await request.json();
 
-    const name = String(body.name || "").trim();
-    const slug = String(body.slug || "")
+    const name = String(
+      body.name || ""
+    ).trim();
+
+    const slug = String(
+      body.slug || ""
+    )
       .trim()
       .toLowerCase();
 
@@ -85,9 +109,14 @@ export async function POST(request: Request) {
       body.description === null ||
       body.description === undefined
         ? null
-        : String(body.description).trim();
+        : String(
+            body.description
+          ).trim();
 
-    const price = Number(body.price);
+    const price = Number(
+      body.price
+    );
+
     const currency = String(
       body.currency || "NGN"
     )
@@ -104,13 +133,15 @@ export async function POST(request: Request) {
       body.auditLimit
     );
 
-    const pagesPerAudit = Number(
-      body.pagesPerAudit
-    );
+    const pagesPerAudit =
+      Number(
+        body.pagesPerAudit
+      );
 
-    const aiRecommendationLimit = Number(
-      body.aiRecommendationLimit
-    );
+    const aiRecommendationLimit =
+      Number(
+        body.aiRecommendationLimit
+      );
 
     const maxProjects = Number(
       body.maxProjects
@@ -122,21 +153,37 @@ export async function POST(request: Request) {
     const isFeatured =
       body.isFeatured === true;
 
+    /*
+     * --------------------------------------------------------
+     * VALIDATION
+     * --------------------------------------------------------
+     */
+
     if (!name) {
       return NextResponse.json(
-        { error: "Plan name is required." },
+        {
+          error:
+            "Plan name is required.",
+        },
         { status: 400 }
       );
     }
 
     if (!slug) {
       return NextResponse.json(
-        { error: "Plan slug is required." },
+        {
+          error:
+            "Plan slug is required.",
+        },
         { status: 400 }
       );
     }
 
-    if (!/^[a-z0-9-]+$/.test(slug)) {
+    if (
+      !/^[a-z0-9-]+$/.test(
+        slug
+      )
+    ) {
       return NextResponse.json(
         {
           error:
@@ -146,6 +193,13 @@ export async function POST(request: Request) {
       );
     }
 
+    /*
+     * Price is stored in normal currency units.
+     *
+     * Example:
+     *
+     * 5000 = ₦5,000
+     */
     if (
       !Number.isInteger(price) ||
       price < 0
@@ -153,16 +207,18 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            "Price must be a valid amount in kobo.",
+            "Price must be a valid non-negative amount.",
         },
         { status: 400 }
       );
     }
 
     if (
-      !["monthly", "quarterly", "annually"].includes(
-        interval
-      )
+      ![
+        "monthly",
+        "quarterly",
+        "annually",
+      ].includes(interval)
     ) {
       return NextResponse.json(
         {
@@ -174,7 +230,9 @@ export async function POST(request: Request) {
     }
 
     if (
-      !Number.isInteger(auditLimit) ||
+      !Number.isInteger(
+        auditLimit
+      ) ||
       auditLimit < 0
     ) {
       return NextResponse.json(
@@ -187,7 +245,9 @@ export async function POST(request: Request) {
     }
 
     if (
-      !Number.isInteger(pagesPerAudit) ||
+      !Number.isInteger(
+        pagesPerAudit
+      ) ||
       pagesPerAudit < 1
     ) {
       return NextResponse.json(
@@ -215,7 +275,9 @@ export async function POST(request: Request) {
     }
 
     if (
-      !Number.isInteger(maxProjects) ||
+      !Number.isInteger(
+        maxProjects
+      ) ||
       maxProjects < 1
     ) {
       return NextResponse.json(
@@ -227,14 +289,23 @@ export async function POST(request: Request) {
       );
     }
 
-    const [existingPlan] = await db
-      .select()
-      .from(plans)
-      .where(
-        (table, { eq }) =>
-          eq(table.slug, slug)
-      )
-      .limit(1);
+    /*
+     * --------------------------------------------------------
+     * CHECK DUPLICATE SLUG
+     * --------------------------------------------------------
+     */
+
+    const [existingPlan] =
+      await db
+        .select()
+        .from(plans)
+        .where(
+          eq(
+            plans.slug,
+            slug
+          )
+        )
+        .limit(1);
 
     if (existingPlan) {
       return NextResponse.json(
@@ -247,34 +318,113 @@ export async function POST(request: Request) {
     }
 
     /*
-     * Only one plan should be featured at a time.
+     * --------------------------------------------------------
+     * FREE PLAN
+     * --------------------------------------------------------
+     *
+     * Free plans do not need a Paystack
+     * recurring plan.
+     * --------------------------------------------------------
      */
+
+    let paystackPlanCode:
+      | string
+      | null = null;
+
+    /*
+     * --------------------------------------------------------
+     * CREATE PAYSTACK RECURRING PLAN
+     * --------------------------------------------------------
+     */
+
+    if (price > 0) {
+      /*
+       * Paystack expects the amount
+       * in the smallest currency unit.
+       *
+       * ₦5,000 -> 500000
+       */
+
+      const paystackAmount =
+        Math.round(
+          price * 100
+        );
+
+      /*
+       * Paystack interval uses
+       * "annually", etc.
+       */
+
+      const paystackPlan =
+        await createPaystackPlan({
+          name,
+          amount:
+            paystackAmount,
+          interval:
+            interval as
+              | "monthly"
+              | "quarterly"
+              | "annually",
+          currency,
+          description:
+            description ||
+            undefined,
+        });
+
+      if (
+        !paystackPlan.data
+          ?.plan_code
+      ) {
+        throw new Error(
+          "Paystack did not return a plan code."
+        );
+      }
+
+      paystackPlanCode =
+        paystackPlan.data.plan_code;
+    }
+
+    /*
+     * --------------------------------------------------------
+     * ONLY ONE FEATURED PLAN
+     * --------------------------------------------------------
+     */
+
     if (isFeatured) {
       await db
         .update(plans)
         .set({
           isFeatured: false,
-          updatedAt: new Date(),
+          updatedAt:
+            new Date(),
         });
     }
 
-    const [plan] = await db
-      .insert(plans)
-      .values({
-        name,
-        slug,
-        description,
-        price,
-        currency,
-        interval,
-        auditLimit,
-        pagesPerAudit,
-        aiRecommendationLimit,
-        maxProjects,
-        isActive,
-        isFeatured,
-      })
-      .returning();
+    /*
+     * --------------------------------------------------------
+     * CREATE LOCAL PLAN
+     * --------------------------------------------------------
+     */
+
+    const [plan] =
+      await db
+        .insert(plans)
+        .values({
+          name,
+          slug,
+          description,
+          price,
+          currency,
+          interval,
+          auditLimit,
+          pagesPerAudit,
+          aiRecommendationLimit,
+          maxProjects,
+          isActive,
+          isFeatured,
+          paystackPlanCode,
+        })
+        .returning();
 
     return NextResponse.json(
       {
@@ -284,7 +434,10 @@ export async function POST(request: Request) {
       { status: 201 }
     );
   } catch (error) {
-    console.error("Admin plans POST error:", error);
+    console.error(
+      "Admin plans POST error:",
+      error
+    );
 
     return NextResponse.json(
       {

@@ -5,6 +5,7 @@ import {
   text,
   boolean,
   integer,
+  numeric,
   timestamp,
   jsonb,
   index,
@@ -39,29 +40,24 @@ export const users = pgTable(
       .notNull()
       .default("user"),
 
-    emailVerifiedAt: timestamp(
-      "email_verified_at",
-      { withTimezone: true }
-    ),
+    emailVerifiedAt: timestamp("email_verified_at", {
+      withTimezone: true,
+    }),
 
-    createdAt: timestamp(
-      "created_at",
-      { withTimezone: true }
-    )
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+    })
       .defaultNow()
       .notNull(),
 
-    updatedAt: timestamp(
-      "updated_at",
-      { withTimezone: true }
-    )
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+    })
       .defaultNow()
       .notNull(),
   },
   (table) => ({
-    roleIdx: index("users_role_idx").on(
-      table.role
-    ),
+    roleIdx: index("users_role_idx").on(table.role),
   })
 );
 
@@ -73,9 +69,7 @@ export const users = pgTable(
 export const sessions = pgTable(
   "sessions",
   {
-    id: uuid("id")
-      .defaultRandom()
-      .primaryKey(),
+    id: uuid("id").defaultRandom().primaryKey(),
 
     userId: uuid("user_id")
       .notNull()
@@ -83,30 +77,22 @@ export const sessions = pgTable(
         onDelete: "cascade",
       }),
 
-    tokenHash: text("token_hash")
-      .notNull()
-      .unique(),
+    tokenHash: text("token_hash").notNull().unique(),
 
-    expiresAt: timestamp(
-      "expires_at",
-      { withTimezone: true }
-    ).notNull(),
+    expiresAt: timestamp("expires_at", {
+      withTimezone: true,
+    }).notNull(),
 
-    createdAt: timestamp(
-      "created_at",
-      { withTimezone: true }
-    )
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+    })
       .defaultNow()
       .notNull(),
   },
   (table) => ({
-    userIdx: index("sessions_user_id_idx").on(
-      table.userId
-    ),
+    userIdx: index("sessions_user_id_idx").on(table.userId),
 
-    expiresIdx: index(
-      "sessions_expires_at_idx"
-    ).on(table.expiresAt),
+    expiresIdx: index("sessions_expires_at_idx").on(table.expiresAt),
   })
 );
 
@@ -118,9 +104,7 @@ export const sessions = pgTable(
 export const passwordResetTokens = pgTable(
   "password_reset_tokens",
   {
-    id: uuid("id")
-      .defaultRandom()
-      .primaryKey(),
+    id: uuid("id").defaultRandom().primaryKey(),
 
     userId: uuid("user_id")
       .notNull()
@@ -128,35 +112,28 @@ export const passwordResetTokens = pgTable(
         onDelete: "cascade",
       }),
 
-    tokenHash: text("token_hash")
-      .notNull()
-      .unique(),
+    tokenHash: text("token_hash").notNull().unique(),
 
-    expiresAt: timestamp(
-      "expires_at",
-      { withTimezone: true }
-    ).notNull(),
+    expiresAt: timestamp("expires_at", {
+      withTimezone: true,
+    }).notNull(),
 
-    usedAt: timestamp(
-      "used_at",
-      { withTimezone: true }
-    ),
+    usedAt: timestamp("used_at", {
+      withTimezone: true,
+    }),
 
-    createdAt: timestamp(
-      "created_at",
-      { withTimezone: true }
-    )
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+    })
       .defaultNow()
       .notNull(),
   },
   (table) => ({
-    userIdx: index(
-      "password_reset_tokens_user_id_idx"
-    ).on(table.userId),
+    userIdx: index("password_reset_tokens_user_id_idx").on(table.userId),
 
-    expiresIdx: index(
-      "password_reset_tokens_expires_at_idx"
-    ).on(table.expiresAt),
+    expiresIdx: index("password_reset_tokens_expires_at_idx").on(
+      table.expiresAt
+    ),
   })
 );
 
@@ -168,16 +145,11 @@ export const passwordResetTokens = pgTable(
 export const projects = pgTable(
   "projects",
   {
-    id: uuid("id")
-      .defaultRandom()
-      .primaryKey(),
+    id: uuid("id").defaultRandom().primaryKey(),
 
-    userId: uuid("user_id").references(
-      () => users.id,
-      {
-        onDelete: "set null",
-      }
-    ),
+    userId: uuid("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
 
     name: varchar("name", {
       length: 255,
@@ -189,32 +161,24 @@ export const projects = pgTable(
 
     description: text("description"),
 
-    isActive: boolean("is_active")
-      .notNull()
-      .default(true),
+    isActive: boolean("is_active").notNull().default(true),
 
-    createdAt: timestamp(
-      "created_at",
-      { withTimezone: true }
-    )
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+    })
       .defaultNow()
       .notNull(),
 
-    updatedAt: timestamp(
-      "updated_at",
-      { withTimezone: true }
-    )
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+    })
       .defaultNow()
       .notNull(),
   },
   (table) => ({
-    userIdx: index("projects_user_id_idx").on(
-      table.userId
-    ),
+    userIdx: index("projects_user_id_idx").on(table.userId),
 
-    activeIdx: index(
-      "projects_is_active_idx"
-    ).on(table.isActive),
+    activeIdx: index("projects_is_active_idx").on(table.isActive),
   })
 );
 
@@ -226,9 +190,7 @@ export const projects = pgTable(
 export const audits = pgTable(
   "audits",
   {
-    id: uuid("id")
-      .defaultRandom()
-      .primaryKey(),
+    id: uuid("id").defaultRandom().primaryKey(),
 
     projectId: uuid("project_id")
       .notNull()
@@ -244,101 +206,46 @@ export const audits = pgTable(
 
     score: integer("score"),
 
-    sitewideScore: integer(
-      "sitewide_score"
-    ),
+    sitewideScore: integer("sitewide_score"),
 
-    pagesCrawled: integer(
-      "pages_crawled"
-    )
+    pagesCrawled: integer("pages_crawled").notNull().default(0),
+
+    pagesWithErrors: integer("pages_with_errors").notNull().default(0),
+
+    pagesWithWarnings: integer("pages_with_warnings").notNull().default(0),
+
+    pagesPassed: integer("pages_passed").notNull().default(0),
+
+    duplicateTitleCount: integer("duplicate_title_count")
       .notNull()
       .default(0),
 
-    pagesWithErrors: integer(
-      "pages_with_errors"
-    )
+    duplicateMetaCount: integer("duplicate_meta_count").notNull().default(0),
+
+    thinContentCount: integer("thin_content_count").notNull().default(0),
+
+    orphanPageCount: integer("orphan_page_count").notNull().default(0),
+
+    brokenLinkCount: integer("broken_link_count").notNull().default(0),
+
+    canonicalConflictCount: integer("canonical_conflict_count")
       .notNull()
       .default(0),
 
-    pagesWithWarnings: integer(
-      "pages_with_warnings"
-    )
-      .notNull()
-      .default(0),
+    redirectChainCount: integer("redirect_chain_count").notNull().default(0),
 
-    pagesPassed: integer(
-      "pages_passed"
-    )
-      .notNull()
-      .default(0),
-
-    /**
-     * Phase 7 - Sitewide SEO Intelligence
-     */
-    duplicateTitleCount: integer(
-      "duplicate_title_count"
-    )
-      .notNull()
-      .default(0),
-
-    duplicateMetaCount: integer(
-      "duplicate_meta_count"
-    )
-      .notNull()
-      .default(0),
-
-    thinContentCount: integer(
-      "thin_content_count"
-    )
-      .notNull()
-      .default(0),
-
-    orphanPageCount: integer(
-      "orphan_page_count"
-    )
-      .notNull()
-      .default(0),
-
-    brokenLinkCount: integer(
-      "broken_link_count"
-    )
-      .notNull()
-      .default(0),
-
-    canonicalConflictCount: integer(
-      "canonical_conflict_count"
-    )
-      .notNull()
-      .default(0),
-
-    redirectChainCount: integer(
-      "redirect_chain_count"
-    )
-      .notNull()
-      .default(0),
-
-    categoryScores: jsonb(
-      "category_scores"
-    )
+    categoryScores: jsonb("category_scores")
       .$type<Record<string, number>>()
       .notNull()
       .default({}),
 
-    /**
-     * Phase 8 - AI SEO Recommendations
-     */
-    aiRecommendations: jsonb(
-      "ai_recommendations"
-    )
+    aiRecommendations: jsonb("ai_recommendations")
       .$type<{
         summary: string;
 
         recommendations: {
           title: string;
-          priority:
-            | "high"
-            | "medium"
-            | "low";
+          priority: "high" | "medium" | "low";
           category: string;
           problem: string;
           whyItMatters: string;
@@ -353,48 +260,36 @@ export const audits = pgTable(
       } | null>()
       .default(null),
 
-    aiGeneratedAt: timestamp(
-      "ai_generated_at",
-      { withTimezone: true }
-    ),
+    aiGeneratedAt: timestamp("ai_generated_at", {
+      withTimezone: true,
+    }),
 
     aiModel: varchar("ai_model", {
       length: 100,
     }),
 
-    errorMessage: text(
-      "error_message"
-    ),
+    errorMessage: text("error_message"),
 
-    startedAt: timestamp(
-      "started_at",
-      { withTimezone: true }
-    ),
+    startedAt: timestamp("started_at", {
+      withTimezone: true,
+    }),
 
-    completedAt: timestamp(
-      "completed_at",
-      { withTimezone: true }
-    ),
+    completedAt: timestamp("completed_at", {
+      withTimezone: true,
+    }),
 
-    createdAt: timestamp(
-      "created_at",
-      { withTimezone: true }
-    )
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+    })
       .defaultNow()
       .notNull(),
   },
   (table) => ({
-    projectIdx: index(
-      "audits_project_id_idx"
-    ).on(table.projectId),
+    projectIdx: index("audits_project_id_idx").on(table.projectId),
 
-    statusIdx: index(
-      "audits_status_idx"
-    ).on(table.status),
+    statusIdx: index("audits_status_idx").on(table.status),
 
-    createdIdx: index(
-      "audits_created_at_idx"
-    ).on(table.createdAt),
+    createdIdx: index("audits_created_at_idx").on(table.createdAt),
   })
 );
 
@@ -406,9 +301,7 @@ export const audits = pgTable(
 export const auditPages = pgTable(
   "audit_pages",
   {
-    id: uuid("id")
-      .defaultRandom()
-      .primaryKey(),
+    id: uuid("id").defaultRandom().primaryKey(),
 
     auditId: uuid("audit_id")
       .notNull()
@@ -416,42 +309,19 @@ export const auditPages = pgTable(
         onDelete: "cascade",
       }),
 
-    /**
-     * Original URL requested/discovered
-     * by the crawler.
-     */
     url: text("url").notNull(),
 
-    /**
-     * Final URL after redirects.
-     */
     finalUrl: text("final_url"),
 
-    /**
-     * Final HTTP response status.
-     */
     statusCode: integer("status_code"),
 
     contentType: varchar("content_type", {
       length: 100,
     }),
 
-    /**
-     * Number of redirects before reaching
-     * finalUrl.
-     */
-    redirectCount: integer(
-      "redirect_count"
-    )
-      .notNull()
-      .default(0),
+    redirectCount: integer("redirect_count").notNull().default(0),
 
-    /**
-     * Complete redirect chain.
-     */
-    redirectChain: jsonb(
-      "redirect_chain"
-    )
+    redirectChain: jsonb("redirect_chain")
       .$type<
         {
           url: string;
@@ -464,25 +334,15 @@ export const auditPages = pgTable(
 
     title: text("title"),
 
-    titleLength: integer(
-      "title_length"
-    ),
+    titleLength: integer("title_length"),
 
-    metaDescription: text(
-      "meta_description"
-    ),
+    metaDescription: text("meta_description"),
 
-    metaDescriptionLength: integer(
-      "meta_description_length"
-    ),
+    metaDescriptionLength: integer("meta_description_length"),
 
-    canonicalUrl: text(
-      "canonical_url"
-    ),
+    canonicalUrl: text("canonical_url"),
 
-    robotsMeta: text(
-      "robots_meta"
-    ),
+    robotsMeta: text("robots_meta"),
 
     h1: text("h1"),
 
@@ -492,65 +352,40 @@ export const auditPages = pgTable(
 
     wordCount: integer("word_count"),
 
-    internalLinksCount: integer(
-      "internal_links_count"
-    ),
+    internalLinksCount: integer("internal_links_count"),
 
-    externalLinksCount: integer(
-      "external_links_count"
-    ),
+    externalLinksCount: integer("external_links_count"),
 
-    imagesCount: integer(
-      "images_count"
-    ),
+    imagesCount: integer("images_count"),
 
-    imagesWithoutAlt: integer(
-      "images_without_alt"
-    ),
+    imagesWithoutAlt: integer("images_without_alt"),
 
     hasHttps: boolean("has_https"),
 
     hasSchema: boolean("has_schema"),
 
-    hasOpenGraph: boolean(
-      "has_open_graph"
-    ),
+    hasOpenGraph: boolean("has_open_graph"),
 
-    hasTwitterCard: boolean(
-      "has_twitter_card"
-    ),
+    hasTwitterCard: boolean("has_twitter_card"),
 
-    isIndexable: boolean(
-      "is_indexable"
-    ),
+    isIndexable: boolean("is_indexable"),
 
-    pageScore: integer(
-      "page_score"
-    ),
+    pageScore: integer("page_score"),
 
-    responseTimeMs: integer(
-      "response_time_ms"
-    ),
+    responseTimeMs: integer("response_time_ms"),
 
-    createdAt: timestamp(
-      "created_at",
-      { withTimezone: true }
-    )
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+    })
       .defaultNow()
       .notNull(),
   },
   (table) => ({
-    auditIdx: index(
-      "audit_pages_audit_id_idx"
-    ).on(table.auditId),
+    auditIdx: index("audit_pages_audit_id_idx").on(table.auditId),
 
-    statusIdx: index(
-      "audit_pages_status_code_idx"
-    ).on(table.statusCode),
+    statusIdx: index("audit_pages_status_code_idx").on(table.statusCode),
 
-    indexableIdx: index(
-      "audit_pages_is_indexable_idx"
-    ).on(table.isIndexable),
+    indexableIdx: index("audit_pages_is_indexable_idx").on(table.isIndexable),
   })
 );
 
@@ -562,9 +397,7 @@ export const auditPages = pgTable(
 export const auditLinks = pgTable(
   "audit_links",
   {
-    id: uuid("id")
-      .defaultRandom()
-      .primaryKey(),
+    id: uuid("id").defaultRandom().primaryKey(),
 
     auditId: uuid("audit_id")
       .notNull()
@@ -578,74 +411,46 @@ export const auditLinks = pgTable(
         onDelete: "cascade",
       }),
 
-    sourceUrl: text(
-      "source_url"
-    ).notNull(),
+    sourceUrl: text("source_url").notNull(),
 
-    targetUrl: text(
-      "target_url"
-    ).notNull(),
+    targetUrl: text("target_url").notNull(),
 
-    normalizedTargetUrl: text(
-      "normalized_target_url"
-    ).notNull(),
+    normalizedTargetUrl: text("normalized_target_url").notNull(),
 
-    anchorText: text(
-      "anchor_text"
-    ),
+    anchorText: text("anchor_text"),
 
-    isInternal: boolean(
-      "is_internal"
-    )
-      .notNull()
-      .default(true),
+    isInternal: boolean("is_internal").notNull().default(true),
 
-    targetStatusCode: integer(
-      "target_status_code"
-    ),
+    targetStatusCode: integer("target_status_code"),
 
-    targetPageId: uuid(
-      "target_page_id"
-    ).references(
-      () => auditPages.id,
-      {
-        onDelete: "set null",
-      }
-    ),
+    targetPageId: uuid("target_page_id").references(() => auditPages.id, {
+      onDelete: "set null",
+    }),
 
-    isBroken: boolean(
-      "is_broken"
-    )
-      .notNull()
-      .default(false),
+    isBroken: boolean("is_broken").notNull().default(false),
 
-    createdAt: timestamp(
-      "created_at",
-      { withTimezone: true }
-    )
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+    })
       .defaultNow()
       .notNull(),
   },
   (table) => ({
-    auditIdx: index(
-      "audit_links_audit_id_idx"
-    ).on(table.auditId),
+    auditIdx: index("audit_links_audit_id_idx").on(table.auditId),
 
-    sourcePageIdx: index(
-      "audit_links_source_page_id_idx"
-    ).on(table.sourcePageId),
+    sourcePageIdx: index("audit_links_source_page_id_idx").on(
+      table.sourcePageId
+    ),
 
-    targetPageIdx: index(
-      "audit_links_target_page_id_idx"
-    ).on(table.targetPageId),
+    targetPageIdx: index("audit_links_target_page_id_idx").on(
+      table.targetPageId
+    ),
 
-    brokenIdx: index(
-      "audit_links_is_broken_idx"
-    ).on(table.isBroken),
+    brokenIdx: index("audit_links_is_broken_idx").on(table.isBroken),
 
-    normalizedTargetIdx: index(
-      "audit_links_normalized_target_url_idx"
-    ).on(table.normalizedTargetUrl),
+    normalizedTargetIdx: index("audit_links_normalized_target_url_idx").on(
+      table.normalizedTargetUrl
+    ),
   })
 );
 
@@ -657,9 +462,7 @@ export const auditLinks = pgTable(
 export const auditIssues = pgTable(
   "audit_issues",
   {
-    id: uuid("id")
-      .defaultRandom()
-      .primaryKey(),
+    id: uuid("id").defaultRandom().primaryKey(),
 
     auditId: uuid("audit_id")
       .notNull()
@@ -667,12 +470,9 @@ export const auditIssues = pgTable(
         onDelete: "cascade",
       }),
 
-    pageId: uuid("page_id").references(
-      () => auditPages.id,
-      {
-        onDelete: "cascade",
-      }
-    ),
+    pageId: uuid("page_id").references(() => auditPages.id, {
+      onDelete: "cascade",
+    }),
 
     category: varchar("category", {
       length: 100,
@@ -690,37 +490,24 @@ export const auditIssues = pgTable(
       length: 255,
     }).notNull(),
 
-    description: text(
-      "description"
-    ),
+    description: text("description"),
 
-    recommendation: text(
-      "recommendation"
-    ),
+    recommendation: text("recommendation"),
 
-    createdAt: timestamp(
-      "created_at",
-      { withTimezone: true }
-    )
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+    })
       .defaultNow()
       .notNull(),
   },
   (table) => ({
-    auditIdx: index(
-      "audit_issues_audit_id_idx"
-    ).on(table.auditId),
+    auditIdx: index("audit_issues_audit_id_idx").on(table.auditId),
 
-    pageIdx: index(
-      "audit_issues_page_id_idx"
-    ).on(table.pageId),
+    pageIdx: index("audit_issues_page_id_idx").on(table.pageId),
 
-    severityIdx: index(
-      "audit_issues_severity_idx"
-    ).on(table.severity),
+    severityIdx: index("audit_issues_severity_idx").on(table.severity),
 
-    categoryIdx: index(
-      "audit_issues_category_idx"
-    ).on(table.category),
+    categoryIdx: index("audit_issues_category_idx").on(table.category),
   })
 );
 
@@ -732,9 +519,7 @@ export const auditIssues = pgTable(
 export const plans = pgTable(
   "plans",
   {
-    id: uuid("id")
-      .defaultRandom()
-      .primaryKey(),
+    id: uuid("id").defaultRandom().primaryKey(),
 
     name: varchar("name", {
       length: 100,
@@ -746,20 +531,13 @@ export const plans = pgTable(
       .notNull()
       .unique(),
 
-    description: text(
-      "description"
-    ),
+    description: text("description"),
 
     /**
-     * Amount in the smallest currency
-     * unit used by Paystack.
-     *
-     * Example:
-     * ₦5,000 = 500000 kobo
+     * Amount in the smallest currency unit (kobo for NGN).
+     * Example: ₦5,000 = 500000
      */
-    price: integer("price")
-      .notNull()
-      .default(0),
+    price: integer("price").notNull().default(0),
 
     currency: varchar("currency", {
       length: 10,
@@ -773,93 +551,42 @@ export const plans = pgTable(
       .notNull()
       .default("monthly"),
 
-    /**
-     * Number of audits allowed
-     * during the subscription period.
-     */
-    auditLimit: integer(
-      "audit_limit"
-    )
-      .notNull()
-      .default(3),
+    auditLimit: integer("audit_limit").notNull().default(3),
 
-    /**
-     * Maximum pages allowed per audit.
-     */
-    pagesPerAudit: integer(
-      "pages_per_audit"
-    )
-      .notNull()
-      .default(20),
+    pagesPerAudit: integer("pages_per_audit").notNull().default(20),
 
-    /**
-     * Number of AI recommendation
-     * generations allowed.
-     */
-    aiRecommendationLimit: integer(
-      "ai_recommendation_limit"
-    )
+    aiRecommendationLimit: integer("ai_recommendation_limit")
       .notNull()
       .default(0),
 
-    /**
-     * Maximum projects allowed.
-     */
-    maxProjects: integer(
-      "max_projects"
-    )
-      .notNull()
-      .default(1),
+    maxProjects: integer("max_projects").notNull().default(1),
 
-    isActive: boolean("is_active")
-      .notNull()
-      .default(true),
+    isActive: boolean("is_active").notNull().default(true),
 
-    isFeatured: boolean(
-      "is_featured"
-    )
-      .notNull()
-      .default(false),
+    isFeatured: boolean("is_featured").notNull().default(false),
 
-    /**
-     * Paystack recurring plan code.
-     *
-     * Required for paid recurring
-     * subscriptions.
-     */
-    paystackPlanCode: varchar(
-      "paystack_plan_code",
-      {
-        length: 100,
-      }
-    ),
+    paystackPlanCode: varchar("paystack_plan_code", {
+      length: 100,
+    }),
 
-    createdAt: timestamp(
-      "created_at",
-      { withTimezone: true }
-    )
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+    })
       .defaultNow()
       .notNull(),
 
-    updatedAt: timestamp(
-      "updated_at",
-      { withTimezone: true }
-    )
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+    })
       .defaultNow()
       .notNull(),
   },
   (table) => ({
-    activeIdx: index(
-      "plans_is_active_idx"
-    ).on(table.isActive),
+    activeIdx: index("plans_is_active_idx").on(table.isActive),
 
-    featuredIdx: index(
-      "plans_is_featured_idx"
-    ).on(table.isFeatured),
+    featuredIdx: index("plans_is_featured_idx").on(table.isFeatured),
 
-    intervalIdx: index(
-      "plans_interval_idx"
-    ).on(table.interval),
+    intervalIdx: index("plans_interval_idx").on(table.interval),
   })
 );
 
@@ -867,13 +594,16 @@ export const plans = pgTable(
  * ============================================================
  * SUBSCRIPTIONS
  * ============================================================
+ *
+ * NOTE: if your DB table is named "user_subscriptions",
+ * change the first argument of pgTable below from
+ * "subscriptions" to "user_subscriptions" so the FK
+ * from payments resolves.
  */
 export const subscriptions = pgTable(
   "subscriptions",
   {
-    id: uuid("id")
-      .defaultRandom()
-      .primaryKey(),
+    id: uuid("id").defaultRandom().primaryKey(),
 
     userId: uuid("user_id")
       .notNull()
@@ -887,102 +617,60 @@ export const subscriptions = pgTable(
         onDelete: "restrict",
       }),
 
-    /**
-     * Expected values:
-     *
-     * active
-     * cancelled
-     * expired
-     * past_due
-     * non_renewing
-     */
     status: varchar("status", {
       length: 50,
     })
       .notNull()
       .default("active"),
 
-    paystackCustomerCode: varchar(
-      "paystack_customer_code",
-      {
-        length: 100,
-      }
-    ),
+    paystackCustomerCode: varchar("paystack_customer_code", {
+      length: 100,
+    }),
 
-    /**
-     * Paystack recurring subscription
-     * code.
-     */
-    paystackSubscriptionCode: varchar(
-      "paystack_subscription_code",
-      {
-        length: 100,
-      }
-    ),
+    paystackSubscriptionCode: varchar("paystack_subscription_code", {
+      length: 100,
+    }),
 
-    /**
-     * Paystack email token used for
-     * subscription management actions.
-     */
-    paystackEmailToken: text(
-      "paystack_email_token"
-    ),
+    paystackEmailToken: text("paystack_email_token"),
 
-    startsAt: timestamp(
-      "starts_at",
-      { withTimezone: true }
-    ).notNull(),
+    startsAt: timestamp("starts_at", {
+      withTimezone: true,
+    }).notNull(),
 
-    endsAt: timestamp(
-      "ends_at",
-      { withTimezone: true }
-    ).notNull(),
+    endsAt: timestamp("ends_at", {
+      withTimezone: true,
+    }).notNull(),
 
-    cancelledAt: timestamp(
-      "cancelled_at",
-      { withTimezone: true }
-    ),
+    cancelledAt: timestamp("cancelled_at", {
+      withTimezone: true,
+    }),
 
-    createdAt: timestamp(
-      "created_at",
-      { withTimezone: true }
-    )
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+    })
       .defaultNow()
       .notNull(),
 
-    updatedAt: timestamp(
-      "updated_at",
-      { withTimezone: true }
-    )
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+    })
       .defaultNow()
       .notNull(),
   },
   (table) => ({
-    userIdx: index(
-      "subscriptions_user_id_idx"
-    ).on(table.userId),
+    userIdx: index("subscriptions_user_id_idx").on(table.userId),
 
-    planIdx: index(
-      "subscriptions_plan_id_idx"
-    ).on(table.planId),
+    planIdx: index("subscriptions_plan_id_idx").on(table.planId),
 
-    statusIdx: index(
-      "subscriptions_status_idx"
-    ).on(table.status),
+    statusIdx: index("subscriptions_status_idx").on(table.status),
 
-    endsAtIdx: index(
-      "subscriptions_ends_at_idx"
-    ).on(table.endsAt),
+    endsAtIdx: index("subscriptions_ends_at_idx").on(table.endsAt),
 
     paystackSubscriptionIdx: uniqueIndex(
       "subscriptions_paystack_subscription_code_idx"
-    ).on(
-      table.paystackSubscriptionCode
-    ),
+    ).on(table.paystackSubscriptionCode),
 
-    userStatusIdx: index(
-      "subscriptions_user_status_idx"
-    ).on(
+    userStatusIdx: index("subscriptions_user_status_idx").on(
       table.userId,
       table.status
     ),
@@ -991,15 +679,27 @@ export const subscriptions = pgTable(
 
 /**
  * ============================================================
- * PAYMENTS
+ * PAYMENTS — aligned to the actual DB table
  * ============================================================
+ *
+ * Column differences from previous version:
+ *   ▸ + provider (required)
+ *   ▸ + providerTransactionId (was paystackTransactionId)
+ *   ▸ amount is numeric(12, 2), not integer
+ *   ▸ planId removed (not in DB — store plan in metadata)
+ *   ▸ paymentType removed
+ *   ▸ paystackCustomerCode removed
+ *   ▸ authorizationCode removed
+ *   ▸ status check constraint: pending | successful | failed | refunded
+ *
+ * FK target: subscription_id → user_subscriptions.id
+ * If your DB table is actually named "subscriptions", change the
+ * reference below back to () => subscriptions.id.
  */
 export const payments = pgTable(
   "payments",
   {
-    id: uuid("id")
-      .defaultRandom()
-      .primaryKey(),
+    id: uuid("id").defaultRandom().primaryKey(),
 
     userId: uuid("user_id")
       .notNull()
@@ -1007,43 +707,41 @@ export const payments = pgTable(
         onDelete: "cascade",
       }),
 
-    planId: uuid("plan_id").references(
-      () => plans.id,
-      {
-        onDelete: "set null",
-      }
-    ),
-
-    subscriptionId: uuid(
-      "subscription_id"
-    ).references(
+    subscriptionId: uuid("subscription_id").references(
       () => subscriptions.id,
       {
         onDelete: "set null",
       }
     ),
 
-    /**
-     * Internal unique payment reference.
-     *
-     * Example:
-     * SUB_a8f2c...
-     */
+    provider: varchar("provider", {
+      length: 50,
+    })
+      .notNull()
+      .default("paystack"),
+
     reference: varchar("reference", {
-      length: 100,
+      length: 255,
     })
       .notNull()
       .unique(),
 
+    providerTransactionId: varchar("provider_transaction_id", {
+      length: 255,
+    }),
+
     /**
-     * Amount stored in the smallest
-     * currency unit.
+     * Amount in the smallest currency unit.
      *
-     * NGN:
-     * ₦5,000 = 500000
+     * NOTE: this column is numeric(12, 2) in the DB.
+     * Drizzle reads/writes it as a string.
+     *
+     * ₦5,000 → "5000.00"
      */
-    amount: integer("amount")
-      .notNull(),
+    amount: numeric("amount", {
+      precision: 12,
+      scale: 2,
+    }).notNull(),
 
     currency: varchar("currency", {
       length: 10,
@@ -1053,10 +751,7 @@ export const payments = pgTable(
 
     /**
      * Expected values:
-     *
-     * pending
-     * success
-     * failed
+     * pending | successful | failed | refunded
      */
     status: varchar("status", {
       length: 50,
@@ -1064,84 +759,36 @@ export const payments = pgTable(
       .notNull()
       .default("pending"),
 
-    paymentType: varchar(
-      "payment_type",
-      {
-        length: 50,
-      }
-    )
-      .notNull()
-      .default("subscription"),
-
-    paystackTransactionId: varchar(
-      "paystack_transaction_id",
-      {
-        length: 100,
-      }
-    ),
-
-    paystackCustomerCode: varchar(
-      "paystack_customer_code",
-      {
-        length: 100,
-      }
-    ),
-
-    authorizationCode: text(
-      "authorization_code"
-    ),
-
     metadata: jsonb("metadata")
-      .$type<
-        Record<string, unknown>
-      >()
+      .$type<Record<string, unknown>>()
       .default({}),
 
-    paidAt: timestamp(
-      "paid_at",
-      { withTimezone: true }
-    ),
+    paidAt: timestamp("paid_at", {
+      withTimezone: true,
+    }),
 
-    createdAt: timestamp(
-      "created_at",
-      { withTimezone: true }
-    )
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+    })
       .defaultNow()
       .notNull(),
 
-    updatedAt: timestamp(
-      "updated_at",
-      { withTimezone: true }
-    )
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+    })
       .defaultNow()
       .notNull(),
   },
   (table) => ({
-    userIdx: index(
-      "payments_user_id_idx"
-    ).on(table.userId),
+    userIdx: index("payments_user_id_idx").on(table.userId),
 
-    planIdx: index(
-      "payments_plan_id_idx"
-    ).on(table.planId),
-
-    subscriptionIdx: index(
-      "payments_subscription_id_idx"
-    ).on(table.subscriptionId),
-
-    statusIdx: index(
-      "payments_status_idx"
-    ).on(table.status),
-
-    createdIdx: index(
-      "payments_created_at_idx"
-    ).on(table.createdAt),
-
-    transactionIdx: uniqueIndex(
-      "payments_paystack_transaction_id_idx"
-    ).on(
-      table.paystackTransactionId
+    subscriptionIdx: index("payments_subscription_id_idx").on(
+      table.subscriptionId
     ),
+
+    statusIdx: index("idx_payments_status").on(table.status),
+
+    referenceIdx: uniqueIndex("payments_reference_key").on(table.reference),
   })
 );
 
@@ -1150,109 +797,67 @@ export const payments = pgTable(
  * SUBSCRIPTION USAGE
  * ============================================================
  */
-export const subscriptionUsage =
-  pgTable(
-    "subscription_usage",
-    {
-      id: uuid("id")
-        .defaultRandom()
-        .primaryKey(),
+export const subscriptionUsage = pgTable(
+  "subscription_usage",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
 
-      subscriptionId: uuid(
-        "subscription_id"
-      )
-        .notNull()
-        .references(
-          () => subscriptions.id,
-          {
-            onDelete: "cascade",
-          }
-        ),
+    subscriptionId: uuid("subscription_id")
+      .notNull()
+      .references(() => subscriptions.id, {
+        onDelete: "cascade",
+      }),
 
-      userId: uuid("user_id")
-        .notNull()
-        .references(
-          () => users.id,
-          {
-            onDelete: "cascade",
-          }
-        ),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, {
+        onDelete: "cascade",
+      }),
 
-      /**
-       * Start of the billing/usage period.
-       */
-      periodStart: timestamp(
-        "period_start",
-        { withTimezone: true }
-      ).notNull(),
+    periodStart: timestamp("period_start", {
+      withTimezone: true,
+    }).notNull(),
 
-      /**
-       * End of the billing/usage period.
-       */
-      periodEnd: timestamp(
-        "period_end",
-        { withTimezone: true }
-      ).notNull(),
+    periodEnd: timestamp("period_end", {
+      withTimezone: true,
+    }).notNull(),
 
-      auditsUsed: integer(
-        "audits_used"
-      )
-        .notNull()
-        .default(0),
+    auditsUsed: integer("audits_used").notNull().default(0),
 
-      pagesCrawled: integer(
-        "pages_crawled"
-      )
-        .notNull()
-        .default(0),
+    pagesCrawled: integer("pages_crawled").notNull().default(0),
 
-      aiRecommendationsUsed: integer(
-        "ai_recommendations_used"
-      )
-        .notNull()
-        .default(0),
+    aiRecommendationsUsed: integer("ai_recommendations_used")
+      .notNull()
+      .default(0),
 
-      createdAt: timestamp(
-        "created_at",
-        { withTimezone: true }
-      )
-        .defaultNow()
-        .notNull(),
-
-      updatedAt: timestamp(
-        "updated_at",
-        { withTimezone: true }
-      )
-        .defaultNow()
-        .notNull(),
-    },
-    (table) => ({
-      subscriptionIdx: index(
-        "subscription_usage_subscription_id_idx"
-      ).on(table.subscriptionId),
-
-      userIdx: index(
-        "subscription_usage_user_id_idx"
-      ).on(table.userId),
-
-      periodIdx: index(
-        "subscription_usage_period_idx"
-      ).on(
-        table.periodStart,
-        table.periodEnd
-      ),
-
-      /**
-       * A subscription/user should only
-       * have one usage record for a
-       * particular billing period.
-       */
-      periodUniqueIdx: uniqueIndex(
-        "subscription_usage_period_unique_idx"
-      ).on(
-        table.subscriptionId,
-        table.periodStart,
-        table.periodEnd
-      ),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
     })
-  );
+      .defaultNow()
+      .notNull(),
+
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+    })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    subscriptionIdx: index("subscription_usage_subscription_id_idx").on(
+      table.subscriptionId
+    ),
+
+    userIdx: index("subscription_usage_user_id_idx").on(table.userId),
+
+    periodIdx: index("subscription_usage_period_idx").on(
+      table.periodStart,
+      table.periodEnd
+    ),
+
+    periodUniqueIdx: uniqueIndex("subscription_usage_period_unique_idx").on(
+      table.subscriptionId,
+      table.periodStart,
+      table.periodEnd
+    ),
+  })
+);
