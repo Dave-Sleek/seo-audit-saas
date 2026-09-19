@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
-import { eq, and, ne } from "drizzle-orm";
+import { and, count, eq, ne } from "drizzle-orm";
 
 import { db } from "@/app/db";
 import {
   users,
-  sessions,
   subscriptions,
-  subscriptionUsage,
   projects,
   audits,
   payments,
@@ -51,6 +49,8 @@ export async function GET(
 
     const { id } = await context.params;
 
+    /* ---------- Load user ---------- */
+
     const [user] = await db
       .select({
         id: users.id,
@@ -72,28 +72,33 @@ export async function GET(
       );
     }
 
-    // Load subscription (latest)
+    /* ---------- Load subscription (latest) ---------- */
+
     const [subscription] = await db
       .select()
       .from(subscriptions)
       .where(eq(subscriptions.userId, id))
       .limit(1);
 
-    // Count projects
-    const projectRows = await db
-      .select({ id: projects.id })
+    /* ---------- Count projects ---------- */
+
+    const [projectCountRow] = await db
+      .select({ value: count() })
       .from(projects)
       .where(eq(projects.userId, id));
 
-    // Count audits
-    const auditRows = await db
-      .select({ id: audits.id })
-      .from(audits)
-      .where(eq(audits.userId, id));
+    /* ---------- Count audits (through projects) ---------- */
 
-    // Count payments
-    const paymentRows = await db
-      .select({ id: payments.id })
+    const [auditCountRow] = await db
+      .select({ value: count() })
+      .from(audits)
+      .innerJoin(projects, eq(audits.projectId, projects.id))
+      .where(eq(projects.userId, id));
+
+    /* ---------- Count payments ---------- */
+
+    const [paymentCountRow] = await db
+      .select({ value: count() })
       .from(payments)
       .where(eq(payments.userId, id));
 
@@ -102,9 +107,9 @@ export async function GET(
       user,
       subscription: subscription ?? null,
       stats: {
-        projects: projectRows.length,
-        audits: auditRows.length,
-        payments: paymentRows.length,
+        projects: Number(projectCountRow?.value ?? 0),
+        audits: Number(auditCountRow?.value ?? 0),
+        payments: Number(paymentCountRow?.value ?? 0),
       },
     });
   } catch (error) {
@@ -334,14 +339,7 @@ export async function DELETE(
       }
     }
 
-    /* ---------- Clean up related rows not covered by cascade ---------- */
-
-    // sessions cascade from users, so no manual cleanup needed
-    // projects cascade from users
-    // audits cascade from projects
-    // subscription_usage cascades from subscriptions
-    // payments cascade from users
-    // subscriptions cascade from users
+    /* ---------- Delete ---------- */
 
     await db.delete(users).where(eq(users.id, id));
 

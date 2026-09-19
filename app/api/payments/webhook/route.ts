@@ -10,84 +10,51 @@ import {
 } from "@/app/lib/paystack";
 import { activateSubscription } from "@/app/lib/subscription";
 
-export async function POST(
-  request: NextRequest
-) {
+export async function POST(request: NextRequest) {
   try {
-    /*
-     * ---------------------------------------------------------
-     * 1. Read raw body
-     * ---------------------------------------------------------
-     *
-     * Required for Paystack HMAC signature verification.
-     */
+    /* ---------------------------------------------------------
+     * 1. Read raw body (required for HMAC verification)
+     * --------------------------------------------------------- */
 
-    const rawBody =
-      await request.text();
+    const rawBody = await request.text();
 
     if (!rawBody) {
       return NextResponse.json(
-        {
-          success: false,
-          error:
-            "Empty webhook body.",
-        },
+        { success: false, error: "Empty webhook body." },
         { status: 400 }
       );
     }
 
-    /*
-     * ---------------------------------------------------------
+    /* ---------------------------------------------------------
      * 2. Verify Paystack signature
-     * ---------------------------------------------------------
-     */
+     * --------------------------------------------------------- */
 
-    const signature =
-      request.headers.get(
-        "x-paystack-signature"
-      );
+    const signature = request.headers.get("x-paystack-signature");
 
     if (!signature) {
-      console.error(
-        "Paystack webhook rejected: missing signature."
-      );
-
+      console.error("Paystack webhook rejected: missing signature.");
       return NextResponse.json(
-        {
-          success: false,
-          error:
-            "Missing webhook signature.",
-        },
+        { success: false, error: "Missing webhook signature." },
         { status: 401 }
       );
     }
 
-    const isValidSignature =
-      verifyPaystackWebhookSignature(
-        rawBody,
-        signature
-      );
+    const isValidSignature = verifyPaystackWebhookSignature(
+      rawBody,
+      signature
+    );
 
     if (!isValidSignature) {
-      console.error(
-        "Paystack webhook rejected: invalid signature."
-      );
-
+      console.error("Paystack webhook rejected: invalid signature.");
       return NextResponse.json(
-        {
-          success: false,
-          error:
-            "Invalid webhook signature.",
-        },
+        { success: false, error: "Invalid webhook signature." },
         { status: 401 }
       );
     }
 
-    /*
-     * ---------------------------------------------------------
+    /* ---------------------------------------------------------
      * 3. Parse payload
-     * ---------------------------------------------------------
-     */
+     * --------------------------------------------------------- */
 
     let payload: {
       event?: string;
@@ -98,194 +65,156 @@ export async function POST(
         amount?: number;
         currency?: string;
         paid_at?: string;
-        customer?: {
-          email?: string;
-        };
+        customer?: { email?: string };
       };
     };
 
     try {
-      payload =
-        JSON.parse(rawBody);
+      payload = JSON.parse(rawBody);
     } catch {
       return NextResponse.json(
-        {
-          success: false,
-          error:
-            "Invalid webhook payload.",
-        },
+        { success: false, error: "Invalid webhook payload." },
         { status: 400 }
       );
     }
 
-    /*
-     * ---------------------------------------------------------
+    /* ---------------------------------------------------------
      * 4. Only process charge.success
-     * ---------------------------------------------------------
-     */
+     *
+     * Other events (subscription.create, subscription.disable,
+     * subscription.not_renew, invoice.payment_failed, etc.)
+     * are acknowledged but not processed here.
+     * --------------------------------------------------------- */
 
-    if (
-      payload.event !==
-      "charge.success"
-    ) {
+    if (payload.event !== "charge.success") {
       return NextResponse.json({
         success: true,
-        message:
-          "Event received.",
+        message: "Event received.",
       });
     }
 
-    /*
-     * ---------------------------------------------------------
-     * 5. Get reference
-     * ---------------------------------------------------------
-     */
+    /* ---------------------------------------------------------
+     * 5. Extract reference
+     * --------------------------------------------------------- */
 
-    const reference =
-      payload.data?.reference?.trim();
+    const reference = payload.data?.reference?.trim();
 
     if (!reference) {
-      console.error(
-        "Paystack webhook: missing transaction reference."
-      );
-
+      console.error("Paystack webhook: missing transaction reference.");
       return NextResponse.json(
-        {
-          success: false,
-          error:
-            "Missing transaction reference.",
-        },
+        { success: false, error: "Missing transaction reference." },
         { status: 400 }
       );
     }
 
-    /*
-     * ---------------------------------------------------------
+    /* ---------------------------------------------------------
      * 6. Find local payment
-     * ---------------------------------------------------------
-     */
+     * --------------------------------------------------------- */
 
-    const [payment] =
-      await db
-        .select()
-        .from(payments)
-        .where(
-          eq(
-            payments.reference,
-            reference
-          )
-        )
-        .limit(1);
+    const [payment] = await db
+      .select()
+      .from(payments)
+      .where(eq(payments.reference, reference))
+      .limit(1);
 
     if (!payment) {
+      /*
+       * We don't create payments from webhook events.
+       * Payments must originate from our own initialize endpoint.
+       */
+
       console.error(
         "Paystack webhook: local payment not found:",
         reference
       );
 
-      /*
-       * We don't create payments from webhook events.
-       *
-       * Payments must originate from our own initialize
-       * endpoint.
-       */
-
       return NextResponse.json({
         success: true,
-        message:
-          "Transaction not recognized.",
+        message: "Transaction not recognized.",
       });
     }
 
-    /*
-     * ---------------------------------------------------------
-     * 7. Already completely processed?
-     * ---------------------------------------------------------
-     */
+    /* ---------------------------------------------------------
+     * 7. Already processed? (idempotency guard)
+     *
+     * DB check constraint allows:
+     *   pending | successful | failed | refunded
+     * --------------------------------------------------------- */
 
     if (
-      payment.status === "success" &&
+      payment.status === "successful" &&
       payment.subscriptionId
     ) {
       return NextResponse.json({
         success: true,
-        message:
-          "Payment already processed.",
+        message: "Payment already processed.",
       });
     }
 
-    /*
-     * ---------------------------------------------------------
+    /* ---------------------------------------------------------
      * 8. Verify transaction directly with Paystack
-     * ---------------------------------------------------------
-     */
+     * --------------------------------------------------------- */
 
     let verification;
 
     try {
-      verification =
-        await verifyTransaction(
-          reference
-        );
+      verification = await verifyTransaction(reference);
     } catch (error) {
       console.error(
         "Paystack webhook verification failed:",
-        error
+        error instanceof Error ? error.message : error
       );
 
-      /*
-       * Return 500 so Paystack can retry.
-       */
-
+      /* Return 500 so Paystack retries. */
       return NextResponse.json(
         {
           success: false,
-          error:
-            "Transaction verification failed.",
+          error: "Transaction verification failed.",
         },
         { status: 500 }
       );
     }
 
-    const transaction =
-      verification.data;
+    const transaction = verification.data;
 
-    /*
-     * ---------------------------------------------------------
+    /* ---------------------------------------------------------
      * 9. Validate transaction
-     * ---------------------------------------------------------
-     */
+     *
+     * validatePaystackPayment expects:
+     *   paystackAmount, expectedAmount,
+     *   paystackCurrency, expectedCurrency,
+     *   paystackStatus
+     *
+     * It internally normalizes amount to integers, so we don't
+     * need to do any conversion here.
+     * --------------------------------------------------------- */
 
     try {
       validatePaystackPayment({
-        data: transaction,
+        paystackAmount: transaction.amount,
         expectedAmount: payment.amount,
-        // expectedAmount: Math.round(
-        //   Number(payment.amount) * 100
-        // ),
-        expectedCurrency:
-          payment.currency,
-        expectedReference:
-          payment.reference,
+        paystackCurrency: transaction.currency,
+        expectedCurrency: payment.currency,
+        paystackStatus: transaction.status,
       });
     } catch (error) {
       console.error(
         "Paystack webhook validation failed:",
-        error
+        error instanceof Error ? error.message : error,
+        {
+          paystackAmount: transaction.amount,
+          paystackCurrency: transaction.currency,
+          paystackStatus: transaction.status,
+          expectedAmount: payment.amount,
+          expectedCurrency: payment.currency,
+          reference,
+        }
       );
 
       await db
         .update(payments)
-        .set({
-          status: "failed",
-          updatedAt: new Date(),
-        })
-        .where(
-          eq(
-            payments.id,
-            payment.id
-          )
-        );
+        .set({ status: "failed", updatedAt: new Date() })
+        .where(eq(payments.id, payment.id));
 
       /*
        * The transaction does not match our expected payment,
@@ -294,127 +223,89 @@ export async function POST(
 
       return NextResponse.json({
         success: true,
-        message:
-          "Payment validation failed.",
+        message: "Payment validation failed.",
       });
     }
 
-    /*
-     * ---------------------------------------------------------
+    /* ---------------------------------------------------------
      * 10. Explicit reference check
-     * ---------------------------------------------------------
-     */
+     * --------------------------------------------------------- */
 
-    if (
-      transaction.reference !==
-      payment.reference
-    ) {
+    if (transaction.reference !== payment.reference) {
       console.error(
         "Paystack webhook reference mismatch:",
         {
-          expected:
-            payment.reference,
-          received:
-            transaction.reference,
+          expected: payment.reference,
+          received: transaction.reference,
         }
       );
 
       await db
         .update(payments)
-        .set({
-          status: "failed",
-          updatedAt: new Date(),
-        })
-        .where(
-          eq(
-            payments.id,
-            payment.id
-          )
-        );
+        .set({ status: "failed", updatedAt: new Date() })
+        .where(eq(payments.id, payment.id));
 
       return NextResponse.json({
         success: true,
-        message:
-          "Reference mismatch.",
+        message: "Reference mismatch.",
       });
     }
 
-    /*
-     * ---------------------------------------------------------
+    /* ---------------------------------------------------------
      * 11. Mark payment successful
-     * ---------------------------------------------------------
-     */
+     *
+     * DB check constraint allows: pending | successful | failed | refunded
+     * Column is provider_transaction_id, NOT paystack_transaction_id.
+     * --------------------------------------------------------- */
 
-    const [updatedPayment] =
-      await db
-        .update(payments)
-        .set({
-          status: "success",
-          paidAt: transaction.paid_at
-            ? new Date(
-                transaction.paid_at
-              )
-            : new Date(),
-          paystackTransactionId:
-            transaction.id !==
-            undefined
-              ? String(
-                  transaction.id
-                )
-              : payment.paystackTransactionId,
-          updatedAt: new Date(),
-        })
-        .where(
-          eq(
-            payments.id,
-            payment.id
-          )
-        )
-        .returning();
+    const [updatedPayment] = await db
+      .update(payments)
+      .set({
+        status: "successful",                     // ← matches DB constraint
+        paidAt: transaction.paid_at
+          ? new Date(transaction.paid_at)
+          : new Date(),
+        providerTransactionId:
+          transaction.id !== undefined
+            ? String(transaction.id)
+            : payment.providerTransactionId,      // ← renamed field
+        updatedAt: new Date(),
+      })
+      .where(eq(payments.id, payment.id))
+      .returning();
 
     if (!updatedPayment) {
       return NextResponse.json(
-        {
-          success: false,
-          error:
-            "Unable to update payment.",
-        },
+        { success: false, error: "Unable to update payment." },
         { status: 500 }
       );
     }
 
-    /*
-     * ---------------------------------------------------------
+    /* ---------------------------------------------------------
      * 12. Activate subscription
-     * ---------------------------------------------------------
      *
      * activateSubscription() locks the payment row with
      * SELECT ... FOR UPDATE.
      *
      * Therefore callback + webhook cannot create two
      * subscriptions for the same payment.
-     */
+     * --------------------------------------------------------- */
 
     try {
       await activateSubscription({
-        paymentId:
-          updatedPayment.id,
-        userId:
-          updatedPayment.userId,
+        paymentId: updatedPayment.id,
+        userId: updatedPayment.userId,
       });
     } catch (error) {
       console.error(
         "Paystack webhook subscription activation failed:",
-        error
+        error instanceof Error ? error.message : error
       );
 
       /*
-       * Payment remains SUCCESS.
-       *
+       * Payment remains SUCCESSFUL.
        * Returning 500 tells Paystack to retry the webhook.
-       *
-       * When the retry arrives, activateSubscription() will
-       * safely continue because it is idempotent.
+       * activateSubscription() is idempotent, so the retry is safe.
        */
 
       return NextResponse.json(
@@ -427,33 +318,24 @@ export async function POST(
       );
     }
 
-    /*
-     * ---------------------------------------------------------
+    /* ---------------------------------------------------------
      * 13. Success
-     * ---------------------------------------------------------
-     */
+     * --------------------------------------------------------- */
 
     return NextResponse.json({
       success: true,
-      message:
-        "Payment processed successfully.",
+      message: "Payment processed successfully.",
     });
   } catch (error) {
     console.error(
       "Paystack webhook error:",
-      error
+      error instanceof Error ? error.message : error,
+      error instanceof Error ? error.stack : undefined
     );
 
-    /*
-     * Return 500 so Paystack can retry the event.
-     */
-
+    /* Return 500 so Paystack retries the event. */
     return NextResponse.json(
-      {
-        success: false,
-        error:
-          "Webhook processing failed.",
-      },
+      { success: false, error: "Webhook processing failed." },
       { status: 500 }
     );
   }

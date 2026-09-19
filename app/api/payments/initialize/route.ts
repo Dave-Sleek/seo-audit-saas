@@ -118,18 +118,10 @@ export async function POST(request: NextRequest) {
      * (kobo for NGN) — the same unit Paystack expects.
      *
      * No conversion needed.
-     *
-     * ₦5,000 → 500000 kobo → sent as-is
      * --------------------------------------------------------- */
 
     /* ---------------------------------------------------------
      * 9. Create pending payment locally
-     *
-     * Schema notes:
-     *   ▸ provider is required (no DB default) — pass explicitly
-     *   ▸ amount is numeric(12, 2) — pass as string
-     *   ▸ no plan_id column — store plan in metadata
-     *   ▸ no payment_type column — omit
      * --------------------------------------------------------- */
 
     const [payment] = await db
@@ -163,24 +155,11 @@ export async function POST(request: NextRequest) {
     try {
       paystackResponse = await initializeTransaction({
         email: user.email,
-
-        /*
-         * plan.price is already in kobo — matches Paystack's
-         * expected unit and the plan's configured amount.
-         */
         amount: plan.price,
-
         currency: plan.currency,
-
         reference,
-
         callbackUrl: getPaymentCallbackUrl(),
-
-        /*
-         * Passing planCode makes this a recurring subscription.
-         */
         planCode: plan.paystackPlanCode,
-
         metadata: {
           userId: user.id,
           planId: plan.id,
@@ -210,9 +189,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: isDev && error instanceof Error
-            ? error.message
-            : "Unable to initialize payment. Please try again.",
+          error:
+            isDev && error instanceof Error
+              ? error.message
+              : "Unable to initialize payment. Please try again.",
         },
         { status: 502 }
       );
@@ -221,7 +201,11 @@ export async function POST(request: NextRequest) {
     /* ---------------------------------------------------------
      * 11. Save provider transaction ID
      *
-     * Column name in DB is provider_transaction_id
+     * Column name in DB is provider_transaction_id.
+     *
+     * Paystack returns the transaction id here. If it's absent
+     * (older API responses), the callback handler will set it
+     * after verification.
      * --------------------------------------------------------- */
 
     if (paystackResponse.data?.id) {

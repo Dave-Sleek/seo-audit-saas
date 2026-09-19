@@ -40,6 +40,7 @@ export type PaystackPlan = {
   interval: string;
 };
 
+
 export type PaystackInitializeResponse = {
   status: boolean;
   message: string;
@@ -48,8 +49,28 @@ export type PaystackInitializeResponse = {
     authorization_url: string;
     access_code: string;
     reference: string;
+
+    /**
+     * Numeric Paystack transaction ID.
+     *
+     * Optional — some responses omit it. When missing, the
+     * payment row's provider_transaction_id is filled by the
+     * callback after verification.
+     */
+    id?: number;
   };
 };
+
+// export type PaystackInitializeResponse = {
+//   status: boolean;
+//   message: string;
+
+//   data: {
+//     authorization_url: string;
+//     access_code: string;
+//     reference: string;
+//   };
+// };
 
 export type PaystackVerifyResponse = {
   status: boolean;
