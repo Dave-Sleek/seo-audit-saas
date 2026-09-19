@@ -8,38 +8,14 @@ import HeroOrbs from "@/app/components/landing/HeroOrbs";
 import LiveDashboard from "@/app/components/landing/LiveDashboard";
 import Reveal from "@/app/components/landing/Reveal";
 import AnimatedMetric from "@/app/components/landing/AnimatedMetric";
+import LandingImage from "@/app/components/landing/LandingImage";
 import IntegrationRow from "@/app/components/landing/IntegrationRow";
 
 import MockImage from "@/app/components/landing/MockImage";
 import AnimatedFaq from "@/app/components/landing/AnimatedFaq";
 import StickyCta from "@/app/components/landing/StickyCta";
 
-/* =========================================================
-   SHARED STYLE TOKENS
-========================================================= */
 
-/**
- * The dark hero background is a single value used everywhere
- * a "dark section" appears (hero, run-audit, final CTA).
- *
- * Keeping it here means mobile and desktop render identically.
- */
-const DARK_SECTION_BG = "#1a0f08";
-
-/**
- * Warm off-white used for body text on dark backgrounds.
- * Pure white blows out on small phone screens; this keeps
- * text readable without vibrating against the dark brown.
- */
-const DARK_TEXT = "rgba(255, 237, 213, 0.92)";
-const DARK_TEXT_MUTED = "rgba(255, 237, 213, 0.65)";
-
-/**
- * Warm radial glow used on every dark section.
- * Consistent opacity across breakpoints.
- */
-const DARK_GLOW_TOP = "rgba(249, 115, 22, 0.32)";
-const DARK_GLOW_BOTTOM = "rgba(234, 88, 12, 0.22)";
 
 /* =========================================================
    DATA
@@ -48,43 +24,37 @@ const DARK_GLOW_BOTTOM = "rgba(234, 88, 12, 0.22)";
 const features = [
   {
     title: "Technical SEO",
-    description:
-      "Identify technical problems that affect crawling, indexing, and search visibility.",
+    description: "Identify technical problems that affect crawling, indexing, and search visibility.",
     icon: GearIcon,
     mock: "technical" as const,
   },
   {
     title: "On-Page SEO",
-    description:
-      "Check titles, meta descriptions, headings, canonical URLs, images, and page elements.",
+    description: "Check titles, meta descriptions, headings, canonical URLs, images, and page elements.",
     icon: FileIcon,
     mock: "onpage" as const,
   },
   {
     title: "Crawlability",
-    description:
-      "Discover broken pages, redirects, indexing problems, and access issues.",
+    description: "Discover broken pages, redirects, indexing problems, and access issues.",
     icon: SearchIcon,
     mock: "crawl" as const,
   },
   {
     title: "Structured Data",
-    description:
-      "Verify schema markup and search-enhancing structured data on every page.",
+    description: "Verify schema markup and search-enhancing structured data on every page.",
     icon: PuzzleIcon,
     mock: "schema" as const,
   },
   {
     title: "Social Metadata",
-    description:
-      "Check Open Graph and Twitter/X metadata so pages look great when shared.",
+    description: "Check Open Graph and Twitter/X metadata so pages look great when shared.",
     icon: LinkIcon,
     mock: "social" as const,
   },
   {
     title: "AI Recommendations",
-    description:
-      "Get practical, prioritized recommendations that explain what to fix first.",
+    description: "Get practical, prioritized recommendations that explain what to fix first.",
     icon: CheckIcon,
     mock: "ai" as const,
   },
@@ -100,15 +70,13 @@ const steps = [
   {
     number: "02",
     title: "We crawl your website",
-    description:
-      "Our crawler visits every page and runs 100+ SEO checks in parallel.",
+    description: "Our crawler visits every page and runs 100+ SEO checks in parallel.",
     mock: "crawl-progress" as const,
   },
   {
     number: "03",
     title: "Get your SEO report",
-    description:
-      "Review scores, issues, affected pages, and prioritized recommendations.",
+    description: "Review scores, issues, affected pages, and prioritized recommendations.",
     mock: "report" as const,
   },
 ];
@@ -144,20 +112,17 @@ export default function HomePage() {
   return (
     <div
       className="min-h-screen"
-      style={{
-        background: "var(--background)",
-        color: "var(--foreground)",
-      }}
+      style={{ background: "var(--background)", color: "var(--foreground)" }}
     >
       <Navbar />
 
       <main>
         {/* =====================================================
-            HERO
+            HERO — copy + CTAs on left, image placeholder on right
         ====================================================== */}
         <section
           className="relative overflow-hidden"
-          style={{ background: DARK_SECTION_BG }}
+          style={{ background: "#1a0f08" }}
         >
           <HeroOrbs />
 
@@ -178,7 +143,7 @@ export default function HomePage() {
                   <span
                     style={{
                       background:
-                        "linear-gradient(120deg, var(--primary) 0%, #fbbf24 100%)",
+                        "linear-gradient(120deg, #f97316 0%, #fbbf24 100%)",
                       WebkitBackgroundClip: "text",
                       backgroundClip: "text",
                       color: "transparent",
@@ -189,15 +154,15 @@ export default function HomePage() {
                 </h1>
 
                 <p
-                  className="lp-fade-up mx-auto mt-6 max-w-xl text-lg leading-8 lg:mx-0"
-                  style={{ color: DARK_TEXT, animationDelay: "200ms" }}
+                  className="lp-fade-up mx-auto mt-6 max-w-xl text-lg leading-8 text-white lg:mx-0"
+                  style={{ animationDelay: "200ms" }}
                 >
                   Analyze technical SEO, content, crawlability, structured
                   data, and social metadata. Get a clear score and
                   prioritized recommendations.
                 </p>
 
-                {/* ---------- CTAs ---------- */}
+                {/* CTAs */}
                 <div
                   className="lp-fade-up mx-auto mt-8 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-center lg:mx-0 lg:justify-start"
                   style={{ animationDelay: "300ms" }}
@@ -227,20 +192,16 @@ export default function HomePage() {
 
                   <a
                     href="#run-audit"
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border px-6 py-3.5 text-sm font-semibold backdrop-blur-sm transition-all duration-300"
-                    style={{
-                      background: "rgba(249, 115, 22, 0.18)",
-                      borderColor: "rgba(249, 115, 22, 0.35)",
-                      color: DARK_TEXT,
-                    }}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/45 px-6 py-3.5 text-sm font-semibold text-white backdrop-blur-sm transition-all duration-300 hover:bg-white/55"
                   >
                     Learn more
                   </a>
                 </div>
 
+                {/* Trust line */}
                 <p
-                  className="lp-fade-up mt-6 text-xs"
-                  style={{ color: DARK_TEXT_MUTED, animationDelay: "400ms" }}
+                  className="lp-fade-up mt-6 text-xs text-white"
+                  style={{ animationDelay: "400ms" }}
                 >
                   No setup required · Free first audit · Results in seconds
                 </p>
@@ -248,18 +209,18 @@ export default function HomePage() {
 
               {/* ---------- RIGHT: image placeholder ---------- */}
               <div
-                className="lp-fade-up mx-auto w-full max-w-xl lg:max-w-none"
-                style={{ animationDelay: "500ms" }}
-              >
-                <div className="rounded-2xl border border-white/10 bg-[#0f0a06] p-3 shadow-2xl">
-                  <MockImage
-                    variant="hero"
-                    ratio="4/3"
-                    className="!border-white/5"
-                    label="Product preview"
-                  />
+                  className="lp-fade-up mx-auto w-full max-w-xl lg:max-w-none"
+                  style={{ animationDelay: "500ms" }}
+                >
+                  <div className="rounded-2xl border border-white/10 bg-[#0f0a06] p-3 shadow-2xl">
+                    <MockImage
+                      variant="hero"
+                      ratio="4/3"
+                      className="!border-white/5"
+                      label="Product preview"
+                    />
+                  </div>
                 </div>
-              </div>
             </div>
           </div>
         </section>
@@ -270,7 +231,7 @@ export default function HomePage() {
         <IntegrationRow />
 
         {/* =====================================================
-            LIVE DASHBOARD
+            LIVE DASHBOARD — full-width section
         ====================================================== */}
         <section className="py-20 sm:py-24">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -396,18 +357,12 @@ export default function HomePage() {
                   <div
                     key={feature.title}
                     className="lp-lift group flex flex-col rounded-2xl border p-5"
-                    style={{
-                      background: "var(--surface)",
-                      borderColor: "var(--border)",
-                    }}
+                    style={{ background: "var(--surface)", borderColor: "var(--border)" }}
                   >
-                    <div className="mb-4 flex items-center gap-2">
+                    <div className="flex items-center gap-2 mb-4">
                       <span
                         className="flex h-8 w-8 items-center justify-center rounded-lg"
-                        style={{
-                          background: "var(--primary-light)",
-                          color: "var(--primary)",
-                        }}
+                        style={{ background: "var(--primary-light)", color: "var(--primary)" }}
                       >
                         <Icon />
                       </span>
@@ -416,16 +371,10 @@ export default function HomePage() {
                     <MockImage variant={feature.mock} ratio="16/9" />
 
                     <div className="mt-4 flex flex-1 flex-col">
-                      <h3
-                        className="text-lg font-semibold"
-                        style={{ color: "var(--text-primary)" }}
-                      >
+                      <h3 className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>
                         {feature.title}
                       </h3>
-                      <p
-                        className="mt-2 text-sm leading-6"
-                        style={{ color: "var(--text-muted)" }}
-                      >
+                      <p className="mt-2 text-sm leading-6" style={{ color: "var(--text-muted)" }}>
                         {feature.description}
                       </p>
                     </div>
@@ -456,15 +405,15 @@ export default function HomePage() {
               </h2>
             </Reveal>
 
-            <Reveal stagger className="mt-14 grid gap-6 md:grid-cols-3">
+            <Reveal
+              stagger
+              className="mt-14 grid gap-6 md:grid-cols-3"
+            >
               {steps.map((step, i) => (
                 <div
                   key={step.number}
                   className="lp-lift relative rounded-2xl border p-5"
-                  style={{
-                    background: "var(--surface)",
-                    borderColor: "var(--border)",
-                  }}
+                  style={{ background: "var(--surface)", borderColor: "var(--border)" }}
                 >
                   <MockImage variant={step.mock} ratio="4/3" />
 
@@ -476,17 +425,11 @@ export default function HomePage() {
                       STEP {step.number}
                     </span>
 
-                    <h3
-                      className="mt-2 text-lg font-semibold"
-                      style={{ color: "var(--text-primary)" }}
-                    >
+                    <h3 className="mt-2 text-lg font-semibold" style={{ color: "var(--text-primary)" }}>
                       {step.title}
                     </h3>
 
-                    <p
-                      className="mt-2 text-sm leading-6"
-                      style={{ color: "var(--text-muted)" }}
-                    >
+                    <p className="mt-2 text-sm leading-6" style={{ color: "var(--text-muted)" }}>
                       {step.description}
                     </p>
                   </div>
@@ -495,8 +438,7 @@ export default function HomePage() {
                     <div
                       className="pointer-events-none absolute -right-3 top-[calc(50%-1px)] hidden h-px w-6 md:block"
                       style={{
-                        background:
-                          "linear-gradient(90deg, var(--primary) 0%, transparent 100%)",
+                        background: "linear-gradient(90deg, var(--primary) 0%, transparent 100%)",
                         opacity: 0.4,
                       }}
                       aria-hidden="true"
@@ -509,18 +451,20 @@ export default function HomePage() {
         </section>
 
         {/* =====================================================
-            RUN AUDIT
+            RUN AUDIT — form section
         ====================================================== */}
         <section
           id="run-audit"
           className="relative overflow-hidden py-20 sm:py-24"
-          style={{ background: DARK_SECTION_BG }}
+          style={{ background: "#1a0f08" }}
         >
+          {/* Soft warm glow */}
           <div
             className="pointer-events-none absolute inset-0"
             aria-hidden="true"
             style={{
-              background: `radial-gradient(900px 460px at 50% 0%, ${DARK_GLOW_TOP}, transparent 65%)`,
+              background:
+                "radial-gradient(900px 460px at 50% 0%, rgba(249,115,22,0.28), transparent 65%)",
             }}
           />
 
@@ -532,13 +476,12 @@ export default function HomePage() {
               >
                 Try it now
               </p>
-              <h2 className="mt-3 text-3xl font-bold tracking-[-0.02em] text-white sm:text-4xl">
+              <h2
+                className="mt-3 text-3xl font-bold tracking-[-0.02em] text-white sm:text-4xl"
+              >
                 Run your free SEO audit
               </h2>
-              <p
-                className="mt-4 text-base sm:text-lg"
-                style={{ color: DARK_TEXT_MUTED }}
-              >
+              <p className="mt-4 text-base text-slate-400 sm:text-lg">
                 Enter any URL. We&apos;ll crawl it, score it, and show you
                 exactly what to fix first.
               </p>
@@ -557,10 +500,7 @@ export default function HomePage() {
             </Reveal>
 
             <Reveal delayMs={250}>
-              <p
-                className="mt-4 text-center text-sm"
-                style={{ color: DARK_TEXT_MUTED }}
-              >
+              <p className="mt-4 text-center text-sm text-slate-500">
                 No signup required. Results in seconds.
               </p>
             </Reveal>
@@ -657,20 +597,10 @@ export default function HomePage() {
               </Reveal>
 
               <Reveal delayMs={150}>
-                <div
-                  className="rounded-3xl border p-6 sm:p-8"
-                  style={{
-                    background: "var(--background)",
-                    borderColor: "var(--border)",
-                  }}
-                >
-                  <MockImage
-                    variant="report"
-                    ratio="4/3"
-                    className="shadow-lg"
-                  />
-                </div>
-              </Reveal>
+                  <div className="rounded-3xl border p-6 sm:p-8" style={{ background: "var(--background)", borderColor: "var(--border)" }}>
+                    <MockImage variant="report" ratio="4/3" className="shadow-lg" />
+                  </div>
+                </Reveal>
             </div>
           </div>
         </section>
@@ -803,6 +733,7 @@ export default function HomePage() {
               <AnimatedFaq faqs={faqs} />
             </Reveal>
           </div>
+          <StickyCta />
         </section>
 
         {/* =====================================================
@@ -810,13 +741,14 @@ export default function HomePage() {
         ====================================================== */}
         <section
           className="relative overflow-hidden py-24"
-          style={{ background: DARK_SECTION_BG }}
+          style={{ background: "#1a0f08" }}
         >
           <div
             className="pointer-events-none absolute inset-0"
             aria-hidden="true"
             style={{
-              background: `radial-gradient(900px 460px at 50% 100%, ${DARK_GLOW_TOP}, transparent 65%)`,
+              background:
+                "radial-gradient(900px 460px at 50% 100%, rgba(249,115,22,0.40), transparent 65%)",
             }}
           />
 
@@ -824,7 +756,8 @@ export default function HomePage() {
             className="pointer-events-none absolute inset-0"
             aria-hidden="true"
             style={{
-              background: `radial-gradient(600px 300px at 20% 0%, ${DARK_GLOW_BOTTOM}, transparent 70%)`,
+              background:
+                "radial-gradient(600px 300px at 20% 0%, rgba(234,88,12,0.22), transparent 70%)",
             }}
           />
 
@@ -838,7 +771,7 @@ export default function HomePage() {
             <Reveal delayMs={100}>
               <p
                 className="mx-auto mt-5 max-w-2xl text-lg"
-                style={{ color: DARK_TEXT_MUTED }}
+                style={{ color: "rgba(255, 237, 213, 0.7)" }}
               >
                 Run an SEO audit and discover the issues that deserve your
                 attention.
@@ -874,8 +807,6 @@ export default function HomePage() {
       </main>
 
       <Footer />
-
-      <StickyCta />
     </div>
   );
 }
@@ -884,18 +815,31 @@ export default function HomePage() {
    ICONS
 ========================================================= */
 
-function GearIcon() {
+function HeroMarkIcon() {
   return (
     <svg
-      width="22"
-      height="22"
+      width="56"
+      height="56"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
+      <circle cx="12" cy="12" r="10" />
+      <circle cx="12" cy="12" r="4" />
+      <line x1="12" y1="2" x2="12" y2="8" />
+      <line x1="12" y1="16" x2="12" y2="22" />
+      <line x1="2" y1="12" x2="8" y2="12" />
+      <line x1="16" y1="12" x2="22" y2="12" />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
@@ -904,16 +848,7 @@ function GearIcon() {
 
 function FileIcon() {
   return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
       <polyline points="14 2 14 8 20 8" />
       <line x1="16" y1="13" x2="8" y2="13" />
@@ -924,16 +859,7 @@ function FileIcon() {
 
 function SearchIcon() {
   return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="11" cy="11" r="8" />
       <line x1="21" y1="21" x2="16.65" y2="16.65" />
     </svg>
@@ -942,16 +868,7 @@ function SearchIcon() {
 
 function PuzzleIcon() {
   return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.855.497.925.968a.979.979 0 0 1-.276.837l-1.61 1.61a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.23 8.77c.24-.24.581-.353.917-.303.515.077.877.528 1.073 1.01a2.5 2.5 0 1 0 3.259-3.259c-.482-.196-.933-.558-1.01-1.073-.05-.336.062-.676.303-.917l1.525-1.525A2.402 2.402 0 0 1 12 1.998c.617 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02z" />
     </svg>
   );
@@ -959,16 +876,7 @@ function PuzzleIcon() {
 
 function LinkIcon() {
   return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
       <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
     </svg>
@@ -977,18 +885,20 @@ function LinkIcon() {
 
 function CheckIcon() {
   return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
       <polyline points="22 4 12 14.01 9 11.01" />
+    </svg>
+  );
+}
+
+function ReportIcon() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="8" y1="13" x2="16" y2="13" />
+      <line x1="8" y1="17" x2="13" y2="17" />
     </svg>
   );
 }

@@ -7,9 +7,13 @@
 
 :root {
   /* Brand */
-  --primary: #635bff;
+
+  --primary: #f97316;
+  --primary-dark: #ea580c;
+  --primary-light: #fff7ed;
+  /* --primary: #635bff;
   --primary-dark: #5147e8;
-  --primary-light: #f0efff;
+  --primary-light: #f0efff; */
 
   /* Semantic */
   --success: #16a34a;
