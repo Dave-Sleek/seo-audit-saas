@@ -56,9 +56,7 @@ export const users = pgTable(
       .defaultNow()
       .notNull(),
   },
-  (table) => ({
-    roleIdx: index("users_role_idx").on(table.role),
-  })
+  (table) => [index("users_role_idx").on(table.role)]
 );
 
 /**
@@ -89,11 +87,10 @@ export const sessions = pgTable(
       .defaultNow()
       .notNull(),
   },
-  (table) => ({
-    userIdx: index("sessions_user_id_idx").on(table.userId),
-
-    expiresIdx: index("sessions_expires_at_idx").on(table.expiresAt),
-  })
+  (table) => [
+    index("sessions_user_id_idx").on(table.userId),
+    index("sessions_expires_at_idx").on(table.expiresAt),
+  ]
 );
 
 /**
@@ -128,13 +125,10 @@ export const passwordResetTokens = pgTable(
       .defaultNow()
       .notNull(),
   },
-  (table) => ({
-    userIdx: index("password_reset_tokens_user_id_idx").on(table.userId),
-
-    expiresIdx: index("password_reset_tokens_expires_at_idx").on(
-      table.expiresAt
-    ),
-  })
+  (table) => [
+    index("password_reset_tokens_user_id_idx").on(table.userId),
+    index("password_reset_tokens_expires_at_idx").on(table.expiresAt),
+  ]
 );
 
 /**
@@ -175,11 +169,10 @@ export const projects = pgTable(
       .defaultNow()
       .notNull(),
   },
-  (table) => ({
-    userIdx: index("projects_user_id_idx").on(table.userId),
-
-    activeIdx: index("projects_is_active_idx").on(table.isActive),
-  })
+  (table) => [
+    index("projects_user_id_idx").on(table.userId),
+    index("projects_is_active_idx").on(table.isActive),
+  ]
 );
 
 /**
@@ -284,13 +277,11 @@ export const audits = pgTable(
       .defaultNow()
       .notNull(),
   },
-  (table) => ({
-    projectIdx: index("audits_project_id_idx").on(table.projectId),
-
-    statusIdx: index("audits_status_idx").on(table.status),
-
-    createdIdx: index("audits_created_at_idx").on(table.createdAt),
-  })
+  (table) => [
+    index("audits_project_id_idx").on(table.projectId),
+    index("audits_status_idx").on(table.status),
+    index("audits_created_at_idx").on(table.createdAt),
+  ]
 );
 
 /**
@@ -380,13 +371,11 @@ export const auditPages = pgTable(
       .defaultNow()
       .notNull(),
   },
-  (table) => ({
-    auditIdx: index("audit_pages_audit_id_idx").on(table.auditId),
-
-    statusIdx: index("audit_pages_status_code_idx").on(table.statusCode),
-
-    indexableIdx: index("audit_pages_is_indexable_idx").on(table.isIndexable),
-  })
+  (table) => [
+    index("audit_pages_audit_id_idx").on(table.auditId),
+    index("audit_pages_status_code_idx").on(table.statusCode),
+    index("audit_pages_is_indexable_idx").on(table.isIndexable),
+  ]
 );
 
 /**
@@ -435,23 +424,15 @@ export const auditLinks = pgTable(
       .defaultNow()
       .notNull(),
   },
-  (table) => ({
-    auditIdx: index("audit_links_audit_id_idx").on(table.auditId),
-
-    sourcePageIdx: index("audit_links_source_page_id_idx").on(
-      table.sourcePageId
-    ),
-
-    targetPageIdx: index("audit_links_target_page_id_idx").on(
-      table.targetPageId
-    ),
-
-    brokenIdx: index("audit_links_is_broken_idx").on(table.isBroken),
-
-    normalizedTargetIdx: index("audit_links_normalized_target_url_idx").on(
+  (table) => [
+    index("audit_links_audit_id_idx").on(table.auditId),
+    index("audit_links_source_page_id_idx").on(table.sourcePageId),
+    index("audit_links_target_page_id_idx").on(table.targetPageId),
+    index("audit_links_is_broken_idx").on(table.isBroken),
+    index("audit_links_normalized_target_url_idx").on(
       table.normalizedTargetUrl
     ),
-  })
+  ]
 );
 
 /**
@@ -500,15 +481,12 @@ export const auditIssues = pgTable(
       .defaultNow()
       .notNull(),
   },
-  (table) => ({
-    auditIdx: index("audit_issues_audit_id_idx").on(table.auditId),
-
-    pageIdx: index("audit_issues_page_id_idx").on(table.pageId),
-
-    severityIdx: index("audit_issues_severity_idx").on(table.severity),
-
-    categoryIdx: index("audit_issues_category_idx").on(table.category),
-  })
+  (table) => [
+    index("audit_issues_audit_id_idx").on(table.auditId),
+    index("audit_issues_page_id_idx").on(table.pageId),
+    index("audit_issues_severity_idx").on(table.severity),
+    index("audit_issues_category_idx").on(table.category),
+  ]
 );
 
 /**
@@ -581,24 +559,17 @@ export const plans = pgTable(
       .defaultNow()
       .notNull(),
   },
-  (table) => ({
-    activeIdx: index("plans_is_active_idx").on(table.isActive),
-
-    featuredIdx: index("plans_is_featured_idx").on(table.isFeatured),
-
-    intervalIdx: index("plans_interval_idx").on(table.interval),
-  })
+  (table) => [
+    index("plans_is_active_idx").on(table.isActive),
+    index("plans_is_featured_idx").on(table.isFeatured),
+    index("plans_interval_idx").on(table.interval),
+  ]
 );
 
 /**
  * ============================================================
  * SUBSCRIPTIONS
  * ============================================================
- *
- * NOTE: if your DB table is named "user_subscriptions",
- * change the first argument of pgTable below from
- * "subscriptions" to "user_subscriptions" so the FK
- * from payments resolves.
  */
 export const subscriptions = pgTable(
   "subscriptions",
@@ -657,44 +628,24 @@ export const subscriptions = pgTable(
       .defaultNow()
       .notNull(),
   },
-  (table) => ({
-    userIdx: index("subscriptions_user_id_idx").on(table.userId),
+  (table) => [
+    index("subscriptions_user_id_idx").on(table.userId),
+    index("subscriptions_plan_id_idx").on(table.planId),
+    index("subscriptions_status_idx").on(table.status),
+    index("subscriptions_ends_at_idx").on(table.endsAt),
 
-    planIdx: index("subscriptions_plan_id_idx").on(table.planId),
-
-    statusIdx: index("subscriptions_status_idx").on(table.status),
-
-    endsAtIdx: index("subscriptions_ends_at_idx").on(table.endsAt),
-
-    paystackSubscriptionIdx: uniqueIndex(
-      "subscriptions_paystack_subscription_code_idx"
-    ).on(table.paystackSubscriptionCode),
-
-    userStatusIdx: index("subscriptions_user_status_idx").on(
-      table.userId,
-      table.status
+    uniqueIndex("subscriptions_paystack_subscription_code_idx").on(
+      table.paystackSubscriptionCode
     ),
-  })
+
+    index("subscriptions_user_status_idx").on(table.userId, table.status),
+  ]
 );
 
 /**
  * ============================================================
- * PAYMENTS — aligned to the actual DB table
+ * PAYMENTS
  * ============================================================
- *
- * Column differences from previous version:
- *   ▸ + provider (required)
- *   ▸ + providerTransactionId (was paystackTransactionId)
- *   ▸ amount is numeric(12, 2), not integer
- *   ▸ planId removed (not in DB — store plan in metadata)
- *   ▸ paymentType removed
- *   ▸ paystackCustomerCode removed
- *   ▸ authorizationCode removed
- *   ▸ status check constraint: pending | successful | failed | refunded
- *
- * FK target: subscription_id → user_subscriptions.id
- * If your DB table is actually named "subscriptions", change the
- * reference below back to () => subscriptions.id.
  */
 export const payments = pgTable(
   "payments",
@@ -732,11 +683,7 @@ export const payments = pgTable(
 
     /**
      * Amount in the smallest currency unit.
-     *
-     * NOTE: this column is numeric(12, 2) in the DB.
-     * Drizzle reads/writes it as a string.
-     *
-     * ₦5,000 → "5000.00"
+     * Column type is numeric(12, 2).
      */
     amount: numeric("amount", {
       precision: 12,
@@ -779,17 +726,13 @@ export const payments = pgTable(
       .defaultNow()
       .notNull(),
   },
-  (table) => ({
-    userIdx: index("payments_user_id_idx").on(table.userId),
+  (table) => [
+    index("payments_user_id_idx").on(table.userId),
+    index("payments_subscription_id_idx").on(table.subscriptionId),
+    index("idx_payments_status").on(table.status),
 
-    subscriptionIdx: index("payments_subscription_id_idx").on(
-      table.subscriptionId
-    ),
-
-    statusIdx: index("idx_payments_status").on(table.status),
-
-    referenceIdx: uniqueIndex("payments_reference_key").on(table.reference),
-  })
+    uniqueIndex("payments_reference_key").on(table.reference),
+  ]
 );
 
 /**
@@ -842,22 +785,19 @@ export const subscriptionUsage = pgTable(
       .defaultNow()
       .notNull(),
   },
-  (table) => ({
-    subscriptionIdx: index("subscription_usage_subscription_id_idx").on(
-      table.subscriptionId
-    ),
+  (table) => [
+    index("subscription_usage_subscription_id_idx").on(table.subscriptionId),
+    index("subscription_usage_user_id_idx").on(table.userId),
 
-    userIdx: index("subscription_usage_user_id_idx").on(table.userId),
-
-    periodIdx: index("subscription_usage_period_idx").on(
+    index("subscription_usage_period_idx").on(
       table.periodStart,
       table.periodEnd
     ),
 
-    periodUniqueIdx: uniqueIndex("subscription_usage_period_unique_idx").on(
+    uniqueIndex("subscription_usage_period_unique_idx").on(
       table.subscriptionId,
       table.periodStart,
       table.periodEnd
     ),
-  })
+  ]
 );

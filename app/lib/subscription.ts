@@ -217,24 +217,32 @@ async function createUsagePeriod(
  * ---------------------------------------------------------
  * Extract plan ID from a payment row.
  *
- * Our payments table does not have a plan_id column, so the
- * plan is stored inside metadata.planId.
+ * The payments table does not have a plan_id column, so
+ * the plan is stored inside metadata.planId.
+ *
+ * Throws if the plan ID is missing — callers do not need to
+ * check for null and TypeScript is able to narrow the type
+ * to `string` after the call.
  * ---------------------------------------------------------
  */
 
 function extractPlanIdFromPayment(
   payment: typeof payments.$inferSelect
-): string | null {
+): string {
   const metadata = payment.metadata as
     | { planId?: string }
     | null
     | undefined;
 
   if (!metadata || typeof metadata !== "object") {
-    return null;
+    throw new Error("PAYMENT_MISSING_PLAN_METADATA");
   }
 
-  return typeof metadata.planId === "string" ? metadata.planId : null;
+  if (typeof metadata.planId !== "string") {
+    throw new Error("PAYMENT_MISSING_PLAN_METADATA");
+  }
+
+  return metadata.planId;
 }
 
 /*
@@ -320,16 +328,12 @@ export async function activateSubscription({
      * -------------------------------------------------------
      * 4. Extract plan ID from metadata
      *
-     * payments has no plan_id column — the plan is inside
-     * metadata.planId (set by the initialize route).
+     * Throws PAYMENT_MISSING_PLAN_METADATA if missing.
+     * Returns a non-null string otherwise.
      * -------------------------------------------------------
      */
 
     const planId = extractPlanIdFromPayment(payment);
-
-    if (!planId) {
-      throw new Error("PAYMENT_MISSING_PLAN_METADATA");
-    }
 
     /*
      * -------------------------------------------------------

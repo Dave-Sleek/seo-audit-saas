@@ -5,6 +5,10 @@ import type {
   SEOPriority,
 } from "./analyzer";
 
+/* =========================================================
+   TYPES
+========================================================= */
+
 export type SitewidePage = {
   id: string;
   url: string;
@@ -56,6 +60,8 @@ export type SitewideLink = {
 };
 
 export type SitewideIssue = SEOIssue & {
+  priority: SEOPriority;
+  weight: number;
   affectedPages: string[];
   affectedCount: number;
 };
@@ -66,21 +72,14 @@ export type SitewideAnalysis = {
   pagesAnalyzed: number;
 
   duplicateTitles: number;
-
   duplicateMetaDescriptions: number;
-
   thinContentPages: number;
-
   orphanPages: number;
-
   brokenInternalLinks: number;
-
   canonicalConflicts: number;
-
   redirectChains: number;
 
   issues: SitewideIssue[];
-
   priorityIssues: SitewideIssue[];
 
   duplicateTitleGroups: Array<{
@@ -108,17 +107,21 @@ export type SitewideAnalysis = {
     statusCode: number | null;
   }>;
 
-  canonicalConflicts: Array<{
+  canonicalConflictList: Array<{
     url: string;
     canonical: string;
   }>;
 
-  redirectChains: Array<{
+  redirectChainList: Array<{
     url: string;
     redirectCount: number;
     chain: SitewidePage["redirectChain"];
   }>;
 };
+
+/* =========================================================
+   ORDERING
+========================================================= */
 
 const PRIORITY_ORDER: Record<SEOPriority, number> = {
   high: 3,
@@ -136,10 +139,7 @@ const SEVERITY_ORDER: Record<SEOIssueSeverity, number> = {
 function priorityForSeverity(
   severity: SEOIssueSeverity
 ): SEOPriority {
-  if (
-    severity === "critical" ||
-    severity === "error"
-  ) {
+  if (severity === "critical" || severity === "error") {
     return "high";
   }
 
@@ -149,6 +149,10 @@ function priorityForSeverity(
 
   return "low";
 }
+
+/* =========================================================
+   ISSUE BUILDER
+========================================================= */
 
 function createIssue(
   category: SEOCategory,
@@ -174,24 +178,21 @@ function createIssue(
   };
 }
 
+/* =========================================================
+   HELPERS
+========================================================= */
+
 function normalizeText(value: string) {
-  return value
-    .trim()
-    .replace(/\s+/g, " ")
-    .toLowerCase();
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 function normalizeUrl(value: string) {
   try {
     const url = new URL(value);
-
     url.hash = "";
-
     return url.toString().replace(/\/$/, "");
   } catch {
-    return value
-      .trim()
-      .replace(/\/$/, "");
+    return value.trim().replace(/\/$/, "");
   }
 }
 
@@ -199,10 +200,7 @@ function buildGroups(
   pages: SitewidePage[],
   selector: (page: SitewidePage) => string | null | undefined
 ) {
-  const groups = new Map<
-    string,
-    string[]
-  >();
+  const groups = new Map<string, string[]>();
 
   for (const page of pages) {
     const value = selector(page);
@@ -218,9 +216,7 @@ function buildGroups(
     }
 
     const existing = groups.get(normalized) ?? [];
-
     existing.push(page.url);
-
     groups.set(normalized, existing);
   }
 
@@ -232,6 +228,10 @@ function buildGroups(
       pages: urls,
     }));
 }
+
+/* =========================================================
+   SCORE
+========================================================= */
 
 function calculateSitewideScore(
   pages: SitewidePage[],
@@ -255,55 +255,26 @@ function calculateSitewideScore(
    */
   let deduction = 0;
 
-  deduction += Math.min(
-    20,
-    duplicateTitles * 4
-  );
-
-  deduction += Math.min(
-    15,
-    duplicateMeta * 3
-  );
-
-  deduction += Math.min(
-    15,
-    thinContent * 2
-  );
-
-  deduction += Math.min(
-    15,
-    orphanPages * 3
-  );
-
-  deduction += Math.min(
-    20,
-    brokenLinks * 4
-  );
-
-  deduction += Math.min(
-    10,
-    canonicalConflicts * 3
-  );
-
-  deduction += Math.min(
-    10,
-    redirectChains * 2
-  );
+  deduction += Math.min(20, duplicateTitles * 4);
+  deduction += Math.min(15, duplicateMeta * 3);
+  deduction += Math.min(15, thinContent * 2);
+  deduction += Math.min(15, orphanPages * 3);
+  deduction += Math.min(20, brokenLinks * 4);
+  deduction += Math.min(10, canonicalConflicts * 3);
+  deduction += Math.min(10, redirectChains * 2);
 
   /*
    * Small penalty for the existence of sitewide issues
    * that aren't represented by the counters above.
    */
-  deduction += Math.min(
-    5,
-    issueCount
-  );
+  deduction += Math.min(5, issueCount);
 
-  return Math.max(
-    0,
-    Math.min(100, Math.round(100 - deduction))
-  );
+  return Math.max(0, Math.min(100, Math.round(100 - deduction)));
 }
+
+/* =========================================================
+   MAIN ANALYZER
+========================================================= */
 
 export function analyzeSitewide(
   pages: SitewidePage[],
@@ -311,15 +282,11 @@ export function analyzeSitewide(
 ): SitewideAnalysis {
   const issues: SitewideIssue[] = [];
 
-  /*
-   * -----------------------------------------------------
+  /* ---------------------------------------------------------
    * DUPLICATE TITLES
-   * -----------------------------------------------------
-   */
-  const duplicateTitleGroups = buildGroups(
-    pages,
-    (page) => page.title
-  );
+   * --------------------------------------------------------- */
+
+  const duplicateTitleGroups = buildGroups(pages, (page) => page.title);
 
   for (const group of duplicateTitleGroups) {
     issues.push(
@@ -336,11 +303,10 @@ export function analyzeSitewide(
     );
   }
 
-  /*
-   * -----------------------------------------------------
+  /* ---------------------------------------------------------
    * DUPLICATE META DESCRIPTIONS
-   * -----------------------------------------------------
-   */
+   * --------------------------------------------------------- */
+
   const duplicateMetaGroups = buildGroups(
     pages,
     (page) => page.metaDescription
@@ -361,20 +327,17 @@ export function analyzeSitewide(
     );
   }
 
-  /*
-   * -----------------------------------------------------
+  /* ---------------------------------------------------------
    * THIN CONTENT
-   * -----------------------------------------------------
    *
-   * We use 300 words as the warning threshold,
-   * matching the page-level analyzer.
-   */
+   * Threshold: 300 words, matching the page-level analyzer.
+   * --------------------------------------------------------- */
+
   const thinContent = pages
     .filter((page) => {
       if (
         page.statusCode &&
-        (page.statusCode < 200 ||
-          page.statusCode >= 300)
+        (page.statusCode < 200 || page.statusCode >= 300)
       ) {
         return false;
       }
@@ -405,12 +368,14 @@ export function analyzeSitewide(
     );
   }
 
-  /*
-   * -----------------------------------------------------
+  /* ---------------------------------------------------------
    * CANONICAL CONFLICTS
-   * -----------------------------------------------------
-   */
-  const canonicalConflicts: Array<{
+   *
+   * Only cross-domain canonicals are flagged.
+   * Self-vs-other-page canonicalization can be intentional.
+   * --------------------------------------------------------- */
+
+  const canonicalConflictList: Array<{
     url: string;
     canonical: string;
   }> = [];
@@ -420,121 +385,79 @@ export function analyzeSitewide(
       continue;
     }
 
-    const pageUrl = normalizeUrl(
-      page.finalUrl || page.url
-    );
+    const pageUrl = normalizeUrl(page.finalUrl || page.url);
+    const canonical = normalizeUrl(page.canonicalUrl);
 
-    const canonical = normalizeUrl(
-      page.canonicalUrl
-    );
-
-    /*
-     * Only flag cross-domain canonical targets here.
-     * Self-vs-other-page canonicalization can be intentional.
-     */
     try {
       const pageHost = new URL(pageUrl).hostname;
-      const canonicalHost =
-        new URL(canonical).hostname;
+      const canonicalHost = new URL(canonical).hostname;
 
       if (pageHost !== canonicalHost) {
-        canonicalConflicts.push({
+        canonicalConflictList.push({
           url: page.url,
           canonical: page.canonicalUrl,
         });
       }
     } catch {
-      canonicalConflicts.push({
+      canonicalConflictList.push({
         url: page.url,
         canonical: page.canonicalUrl,
       });
     }
   }
 
-  if (canonicalConflicts.length > 0) {
+  if (canonicalConflictList.length > 0) {
     issues.push(
       createIssue(
         "technical",
         "cross-domain-canonical",
         "error",
         "Cross-domain canonical conflicts detected",
-        `${canonicalConflicts.length} pages point their canonical URL to another domain.`,
+        `${canonicalConflictList.length} pages point their canonical URL to another domain.`,
         "Verify that each cross-domain canonical is intentional. Otherwise, use a canonical URL on the same site.",
-        canonicalConflicts.map(
-          (item) => item.url
-        ),
+        canonicalConflictList.map((item) => item.url),
         5
       )
     );
   }
 
-  /*
-   * -----------------------------------------------------
+  /* ---------------------------------------------------------
    * REDIRECT CHAINS
-   * -----------------------------------------------------
-   */
-  const redirectChains = pages
-    .filter(
-      (page) =>
-        (page.redirectCount ?? 0) > 0
-    )
+   * --------------------------------------------------------- */
+
+  const allRedirectChains = pages
+    .filter((page) => (page.redirectCount ?? 0) > 0)
     .map((page) => ({
       url: page.url,
-      redirectCount:
-        page.redirectCount ?? 0,
+      redirectCount: page.redirectCount ?? 0,
       chain: page.redirectChain ?? [],
     }));
 
-  const longRedirectChains =
-    redirectChains.filter(
-      (item) => item.redirectCount > 1
-    );
+  const redirectChainList = allRedirectChains.filter(
+    (item) => item.redirectCount > 1
+  );
 
-  if (longRedirectChains.length > 0) {
+  if (redirectChainList.length > 0) {
     issues.push(
       createIssue(
         "crawlability",
         "sitewide-redirect-chains",
         "warning",
         "Redirect chains detected",
-        `${longRedirectChains.length} URLs require multiple redirects before reaching their final destination.`,
+        `${redirectChainList.length} URLs require multiple redirects before reaching their final destination.`,
         "Update internal links to point directly to the final URL and reduce unnecessary redirect hops.",
-        longRedirectChains.map(
-          (item) => item.url
-        ),
+        redirectChainList.map((item) => item.url),
         3
       )
     );
   }
 
-  /*
-   * -----------------------------------------------------
+  /* ---------------------------------------------------------
    * ORPHAN PAGES
-   * -----------------------------------------------------
    *
-   * A page is considered an orphan when no other crawled
-   * internal page links to it.
-   *
-   * The homepage/root URL is excluded.
-   */
-  const crawledUrls = new Map<
-    string,
-    string
-  >();
-
-  for (const page of pages) {
-    crawledUrls.set(
-      normalizeUrl(
-        page.finalUrl || page.url
-      ),
-      page.url
-    );
-
-    crawledUrls.set(
-      normalizeUrl(page.url),
-      page.url
-    );
-  }
+   * A page is orphaned when no other crawled internal page
+   * links to it. The root URL is excluded.
+   * --------------------------------------------------------- */
 
   const linkedTargets = new Set<string>();
 
@@ -543,34 +466,22 @@ export function analyzeSitewide(
       continue;
     }
 
-    linkedTargets.add(
-      normalizeUrl(link.normalizedTargetUrl)
-    );
+    linkedTargets.add(normalizeUrl(link.normalizedTargetUrl));
   }
 
   const orphanPageList = pages
     .filter((page) => {
-      const normalized = normalizeUrl(
-        page.finalUrl || page.url
-      );
+      const normalized = normalizeUrl(page.finalUrl || page.url);
 
       const pathname = (() => {
         try {
-          return new URL(
-            page.finalUrl || page.url
-          ).pathname;
+          return new URL(page.finalUrl || page.url).pathname;
         } catch {
           return "";
         }
       })();
 
-      /*
-       * The root/home page is not considered orphaned.
-       */
-      if (
-        pathname === "/" ||
-        pathname === ""
-      ) {
+      if (pathname === "/" || pathname === "") {
         return false;
       }
 
@@ -593,22 +504,16 @@ export function analyzeSitewide(
     );
   }
 
-  /*
-   * -----------------------------------------------------
+  /* ---------------------------------------------------------
    * BROKEN INTERNAL LINKS
-   * -----------------------------------------------------
-   */
+   * --------------------------------------------------------- */
+
   const brokenLinks = links
-    .filter(
-      (link) =>
-        link.isInternal &&
-        link.isBroken
-    )
+    .filter((link) => link.isInternal && link.isBroken)
     .map((link) => ({
       sourceUrl: link.sourceUrl,
       targetUrl: link.targetUrl,
-      statusCode:
-        link.targetStatusCode ?? null,
+      statusCode: link.targetStatusCode ?? null,
     }));
 
   if (brokenLinks.length > 0) {
@@ -620,45 +525,33 @@ export function analyzeSitewide(
         "Broken internal links detected",
         `${brokenLinks.length} internal links point to unavailable URLs.`,
         "Fix, remove, or redirect broken internal links to the correct destination.",
-        [
-          ...new Set(
-            brokenLinks.map(
-              (link) => link.sourceUrl
-            )
-          ),
-        ],
+        [...new Set(brokenLinks.map((link) => link.sourceUrl))],
         5
       )
     );
   }
 
-  /*
-   * -----------------------------------------------------
-   * ISSUE PRIORITY
-   * -----------------------------------------------------
-   */
+  /* ---------------------------------------------------------
+   * PRIORITY ISSUES
+   * --------------------------------------------------------- */
+
   const priorityIssues = [...issues]
     .sort((a, b) => {
       const priorityDifference =
-        PRIORITY_ORDER[b.priority] -
-        PRIORITY_ORDER[a.priority];
+        PRIORITY_ORDER[b.priority] - PRIORITY_ORDER[a.priority];
 
       if (priorityDifference !== 0) {
         return priorityDifference;
       }
 
-      return (
-        SEVERITY_ORDER[b.severity] -
-        SEVERITY_ORDER[a.severity]
-      );
+      return SEVERITY_ORDER[b.severity] - SEVERITY_ORDER[a.severity];
     })
     .slice(0, 15);
 
-  /*
-   * -----------------------------------------------------
+  /* ---------------------------------------------------------
    * SCORE
-   * -----------------------------------------------------
-   */
+   * --------------------------------------------------------- */
+
   const score = calculateSitewideScore(
     pages,
     issues.length,
@@ -667,52 +560,37 @@ export function analyzeSitewide(
     thinContent.length,
     orphanPageList.length,
     brokenLinks.length,
-    canonicalConflicts.length,
-    longRedirectChains.length
+    canonicalConflictList.length,
+    redirectChainList.length
   );
+
+  /* ---------------------------------------------------------
+   * RESULT
+   * --------------------------------------------------------- */
 
   return {
     score,
 
     pagesAnalyzed: pages.length,
 
-    duplicateTitles:
-      duplicateTitleGroups.length,
-
-    duplicateMetaDescriptions:
-      duplicateMetaGroups.length,
-
-    thinContentPages:
-      thinContent.length,
-
-    orphanPages:
-      orphanPageList.length,
-
-    brokenInternalLinks:
-      brokenLinks.length,
-
-    canonicalConflicts:
-      canonicalConflicts.length,
-
-    redirectChains:
-      longRedirectChains.length,
+    duplicateTitles: duplicateTitleGroups.length,
+    duplicateMetaDescriptions: duplicateMetaGroups.length,
+    thinContentPages: thinContent.length,
+    orphanPages: orphanPageList.length,
+    brokenInternalLinks: brokenLinks.length,
+    canonicalConflicts: canonicalConflictList.length,
+    redirectChains: redirectChainList.length,
 
     issues,
-
     priorityIssues,
 
     duplicateTitleGroups,
-
     duplicateMetaGroups,
-
     thinContent,
-
     orphanPageList,
-
     brokenLinks,
 
-    canonicalConflicts,
-
-    redirectChains: longRedirectChains,
+    canonicalConflictList,
+    redirectChainList,
   };
 }
