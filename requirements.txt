@@ -1,0 +1,138 @@
+users
+projects
+domains
+audits
+audit_results
+pages
+issues
+
+Public pages
+
+Landing page /
+
+Hero
+SEO audit input
+"Analyze My Website" CTA
+Features
+How it works
+Why use the platform
+SEO report preview
+Pricing preview
+Testimonials
+FAQ
+Final CTA
+Footer
+
+Pricing /pricing
+
+Free
+Starter
+Pro
+Business
+Feature comparison
+Crawl limits
+Number of projects
+Audit history
+Advanced SEO reports
+Priority crawling
+Export/report features
+CTA buttons
+
+We can adjust these before connecting payments.
+
+Contact /contact
+
+Contact form
+Name
+Email
+Subject
+Message
+Support email
+Business information
+Social links
+FAQ/response expectations
+
+I would build it in this order
+
+Phase 1 — UI foundation
+
+navbar.tsx
+footer.tsx
+seo-score.tsx
+audit-form.tsx
+
+Phase 2 — Marketing site
+5. Landing page
+6. Pricing page
+7. Contact page
+
+Phase 3 — Authentication
+8. Login
+9. Register
+10. Forgot password
+11. Reset password
+
+Phase 4 — Application
+12. Refactor current audit dashboard to use the reusable components
+13. Connect landing-page audit form to /api/audit
+14. Add authentication protection to dashboard
+15. Connect pricing plans to the subscription/payment system later
+
+
+
+PHASE 3
+Authentication & Ownership
+        ↓
+User → Project → Audit
+        ↓
+Dashboard/account
+        ↓
+[WE ARE HERE]
+        ↓
+PHASE 4
+Crawler Intelligence
+        ↓
+1. Query parameters
+2. robots.txt
+3. Sitemap
+4. Crawl depth
+5. HTTP status
+6. Redirect chains
+7. Response time
+        ↓
+PHASE 5
+SEO Analyzer & Scoring
+        ↓
+Better checks
+Better weighting
+Category scores
+Priority issues
+        ↓
+PHASE 6
+Professional Reports
+        ↓
+Charts
+Priorities
+Comparisons
+Audit history
+        ↓
+PHASE 7
+Subscriptions
+        ↓
+Plans
+Paystack
+Usage limits
+Feature enforcement
+        ↓
+PHASE 8
+Advanced SaaS
+        ↓
+Scheduled audits
+Email reports
+Competitor audits
+Projects
+Team accounts
+API
+
+
+The immediate next step after these pages would therefore be the audit API/frontend error handling, so NO_SUBSCRIPTION, AUDIT_LIMIT_REACHED, and PROJECT_LIMIT_REACHED automatically produce the correct View Plans / Upgrade UI instead of a generic error.
