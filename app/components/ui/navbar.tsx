@@ -137,7 +137,7 @@ export default function Navbar() {
               <Link
                 href="/register"
                 onClick={() => setMobileOpen(false)}
-                className="mt-2 block rounded-lg bg-slate-900 px-3 py-3 text-center text-sm font-semibold text-white hover:bg-slate-800"
+                className="btn-stripe btn-stripe-primary"
               >
                 Get Started
               </Link>
