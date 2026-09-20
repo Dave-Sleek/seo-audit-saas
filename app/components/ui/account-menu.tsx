@@ -200,6 +200,16 @@ export default function AccountMenu({
               <i className="bi bi-person w-5 text-center text-slate-500" />
               <span>Profile</span>
             </Link>
+
+            <Link
+              href="/dashboard/settings"
+              onClick={() => setOpen(false)}
+              className={itemClass}
+              role="menuitem"
+            >
+              <i className="bi bi-gear w-5 text-center text-slate-500" />
+              <span>Settings</span>
+            </Link>
           </div>
 
           {/* Logout */}

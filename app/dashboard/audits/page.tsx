@@ -269,8 +269,8 @@ export default async function AuditsPage() {
               </p>
 
               <Link
-                href="/dashboard/audits/new"
-                className="mt-6 inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800"
+                href="/dashboard"
+                className="mt-6 inline-flex h-10 btn-stripe btn-stripe-primary"
               >
                 Run your first audit
               </Link>
