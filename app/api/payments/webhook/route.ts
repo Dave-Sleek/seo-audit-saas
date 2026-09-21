@@ -1,19 +1,76 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 
 import { db } from "@/app/db";
-import { payments } from "@/app/db/schema";
+import { payments, plans, subscriptions } from "@/app/db/schema";
 import {
   validatePaystackPayment,
   verifyPaystackWebhookSignature,
   verifyTransaction,
 } from "@/app/lib/paystack";
-import { activateSubscription } from "@/app/lib/subscription";
+import {
+  activateSubscription,
+  extendSubscriptionFromRenewal,
+} from "@/app/lib/subscription";
+
+/* =========================================================
+   PAYSTACK EVENT SHAPES
+   ========================================================= */
+
+type PaystackChargeSuccessData = {
+  id?: number | string;
+  reference?: string;
+  status?: string;
+  amount?: number;
+  currency?: string;
+  paid_at?: string;
+  customer?: {
+    email?: string;
+    customer_code?: string;
+  };
+  plan?: {
+    plan_code?: string;
+  } | null;
+  subscription?: {
+    subscription_code?: string;
+    email_token?: string;
+  } | null;
+};
+
+type PaystackSubscriptionData = {
+  subscription_code?: string;
+  email_token?: string;
+  status?: string;
+  customer?: {
+    email?: string;
+    customer_code?: string;
+  };
+  plan?: {
+    plan_code?: string;
+  } | null;
+  next_payment_date?: string;
+};
+
+type PaystackInvoiceData = {
+  subscription?: {
+    subscription_code?: string;
+  } | null;
+  customer?: {
+    customer_code?: string;
+  } | null;
+  amount?: number;
+  paid?: boolean;
+  paid_at?: string;
+};
+
+/* =========================================================
+   WEBHOOK
+   ========================================================= */
 
 export async function POST(request: NextRequest) {
   try {
     /* ---------------------------------------------------------
-     * 1. Read raw body (required for HMAC verification)
+     * 1. Read raw body
      * --------------------------------------------------------- */
 
     const rawBody = await request.text();
@@ -26,7 +83,7 @@ export async function POST(request: NextRequest) {
     }
 
     /* ---------------------------------------------------------
-     * 2. Verify Paystack signature
+     * 2. Verify signature
      * --------------------------------------------------------- */
 
     const signature = request.headers.get("x-paystack-signature");
@@ -39,12 +96,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const isValidSignature = verifyPaystackWebhookSignature(
-      rawBody,
-      signature
-    );
-
-    if (!isValidSignature) {
+    if (!verifyPaystackWebhookSignature(rawBody, signature)) {
       console.error("Paystack webhook rejected: invalid signature.");
       return NextResponse.json(
         { success: false, error: "Invalid webhook signature." },
@@ -56,18 +108,7 @@ export async function POST(request: NextRequest) {
      * 3. Parse payload
      * --------------------------------------------------------- */
 
-    let payload: {
-      event?: string;
-      data?: {
-        id?: number | string;
-        reference?: string;
-        status?: string;
-        amount?: number;
-        currency?: string;
-        paid_at?: string;
-        customer?: { email?: string };
-      };
-    };
+    let payload: { event?: string; data?: unknown };
 
     try {
       payload = JSON.parse(rawBody);
@@ -78,253 +119,74 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    /* ---------------------------------------------------------
-     * 4. Only process charge.success
-     *
-     * Other events (subscription.create, subscription.disable,
-     * subscription.not_renew, invoice.payment_failed, etc.)
-     * are acknowledged but not processed here.
-     * --------------------------------------------------------- */
+    const event = payload.event;
+    const data = payload.data as Record<string, unknown> | undefined;
 
-    if (payload.event !== "charge.success") {
-      return NextResponse.json({
-        success: true,
-        message: "Event received.",
-      });
-    }
-
-    /* ---------------------------------------------------------
-     * 5. Extract reference
-     * --------------------------------------------------------- */
-
-    const reference = payload.data?.reference?.trim();
-
-    if (!reference) {
-      console.error("Paystack webhook: missing transaction reference.");
+    if (!event) {
       return NextResponse.json(
-        { success: false, error: "Missing transaction reference." },
+        { success: false, error: "Missing event type." },
         { status: 400 }
       );
     }
 
     /* ---------------------------------------------------------
-     * 6. Find local payment
-     * --------------------------------------------------------- */
-
-    const [payment] = await db
-      .select()
-      .from(payments)
-      .where(eq(payments.reference, reference))
-      .limit(1);
-
-    if (!payment) {
-      /*
-       * We don't create payments from webhook events.
-       * Payments must originate from our own initialize endpoint.
-       */
-
-      console.error(
-        "Paystack webhook: local payment not found:",
-        reference
-      );
-
-      return NextResponse.json({
-        success: true,
-        message: "Transaction not recognized.",
-      });
-    }
-
-    /* ---------------------------------------------------------
-     * 7. Already processed? (idempotency guard)
-     *
-     * DB check constraint allows:
-     *   pending | successful | failed | refunded
-     * --------------------------------------------------------- */
-
-    if (
-      payment.status === "successful" &&
-      payment.subscriptionId
-    ) {
-      return NextResponse.json({
-        success: true,
-        message: "Payment already processed.",
-      });
-    }
-
-    /* ---------------------------------------------------------
-     * 8. Verify transaction directly with Paystack
-     * --------------------------------------------------------- */
-
-    let verification;
-
-    try {
-      verification = await verifyTransaction(reference);
-    } catch (error) {
-      console.error(
-        "Paystack webhook verification failed:",
-        error instanceof Error ? error.message : error
-      );
-
-      /* Return 500 so Paystack retries. */
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Transaction verification failed.",
-        },
-        { status: 500 }
-      );
-    }
-
-    const transaction = verification.data;
-
-    /* ---------------------------------------------------------
-     * 9. Validate transaction
-     *
-     * validatePaystackPayment expects:
-     *   paystackAmount, expectedAmount,
-     *   paystackCurrency, expectedCurrency,
-     *   paystackStatus
-     *
-     * It internally normalizes amount to integers, so we don't
-     * need to do any conversion here.
+     * 4. Dispatch by event type
      * --------------------------------------------------------- */
 
     try {
-      validatePaystackPayment({
-        paystackAmount: transaction.amount,
-        expectedAmount: payment.amount,
-        paystackCurrency: transaction.currency,
-        expectedCurrency: payment.currency,
-        paystackStatus: transaction.status,
-      });
-    } catch (error) {
-      console.error(
-        "Paystack webhook validation failed:",
-        error instanceof Error ? error.message : error,
-        {
-          paystackAmount: transaction.amount,
-          paystackCurrency: transaction.currency,
-          paystackStatus: transaction.status,
-          expectedAmount: payment.amount,
-          expectedCurrency: payment.currency,
-          reference,
-        }
-      );
+      switch (event) {
+        case "charge.success":
+          await handleChargeSuccess(data as PaystackChargeSuccessData);
+          break;
 
-      await db
-        .update(payments)
-        .set({ status: "failed", updatedAt: new Date() })
-        .where(eq(payments.id, payment.id));
+        case "subscription.create":
+          await handleSubscriptionCreate(
+            data as PaystackSubscriptionData
+          );
+          break;
 
+        case "subscription.not_renew":
+          await handleSubscriptionNotRenew(
+            data as PaystackSubscriptionData
+          );
+          break;
+
+        case "subscription.disable":
+          await handleSubscriptionDisable(
+            data as PaystackSubscriptionData
+          );
+          break;
+
+        case "invoice.payment_failed":
+          await handleInvoicePaymentFailed(data as PaystackInvoiceData);
+          break;
+
+        default:
+          /* Unknown events are acknowledged but ignored. */
+          break;
+      }
+    } catch (handlerError) {
       /*
-       * The transaction does not match our expected payment,
-       * so retrying will not fix it.
+       * If a specific handler throws, log it and return 500
+       * so Paystack retries the event.
        */
 
-      return NextResponse.json({
-        success: true,
-        message: "Payment validation failed.",
-      });
-    }
-
-    /* ---------------------------------------------------------
-     * 10. Explicit reference check
-     * --------------------------------------------------------- */
-
-    if (transaction.reference !== payment.reference) {
       console.error(
-        "Paystack webhook reference mismatch:",
-        {
-          expected: payment.reference,
-          received: transaction.reference,
-        }
+        `Paystack webhook handler failed for "${event}":`,
+        handlerError instanceof Error
+          ? handlerError.message
+          : handlerError
       );
 
-      await db
-        .update(payments)
-        .set({ status: "failed", updatedAt: new Date() })
-        .where(eq(payments.id, payment.id));
-
-      return NextResponse.json({
-        success: true,
-        message: "Reference mismatch.",
-      });
-    }
-
-    /* ---------------------------------------------------------
-     * 11. Mark payment successful
-     *
-     * DB check constraint allows: pending | successful | failed | refunded
-     * Column is provider_transaction_id, NOT paystack_transaction_id.
-     * --------------------------------------------------------- */
-
-    const [updatedPayment] = await db
-      .update(payments)
-      .set({
-        status: "successful",                     // ← matches DB constraint
-        paidAt: transaction.paid_at
-          ? new Date(transaction.paid_at)
-          : new Date(),
-        providerTransactionId:
-          transaction.id !== undefined
-            ? String(transaction.id)
-            : payment.providerTransactionId,      // ← renamed field
-        updatedAt: new Date(),
-      })
-      .where(eq(payments.id, payment.id))
-      .returning();
-
-    if (!updatedPayment) {
       return NextResponse.json(
-        { success: false, error: "Unable to update payment." },
+        { success: false, error: "Handler failed." },
         { status: 500 }
       );
     }
-
-    /* ---------------------------------------------------------
-     * 12. Activate subscription
-     *
-     * activateSubscription() locks the payment row with
-     * SELECT ... FOR UPDATE.
-     *
-     * Therefore callback + webhook cannot create two
-     * subscriptions for the same payment.
-     * --------------------------------------------------------- */
-
-    try {
-      await activateSubscription({
-        paymentId: updatedPayment.id,
-        userId: updatedPayment.userId,
-      });
-    } catch (error) {
-      console.error(
-        "Paystack webhook subscription activation failed:",
-        error instanceof Error ? error.message : error
-      );
-
-      /*
-       * Payment remains SUCCESSFUL.
-       * Returning 500 tells Paystack to retry the webhook.
-       * activateSubscription() is idempotent, so the retry is safe.
-       */
-
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            "Payment received but subscription activation is pending.",
-        },
-        { status: 500 }
-      );
-    }
-
-    /* ---------------------------------------------------------
-     * 13. Success
-     * --------------------------------------------------------- */
 
     return NextResponse.json({
       success: true,
-      message: "Payment processed successfully.",
+      message: "Event received.",
     });
   } catch (error) {
     console.error(
@@ -333,10 +195,409 @@ export async function POST(request: NextRequest) {
       error instanceof Error ? error.stack : undefined
     );
 
-    /* Return 500 so Paystack retries the event. */
     return NextResponse.json(
       { success: false, error: "Webhook processing failed." },
       { status: 500 }
     );
   }
+}
+
+/* =========================================================
+   HANDLER — charge.success
+   =========================================================
+ *
+ * Fires for BOTH the initial payment and every renewal.
+ *
+ * Initial payment:  we already have a payments row → activate
+ * Renewal:          we don't have a payments row → extend
+ * ========================================================= */
+
+async function handleChargeSuccess(data: PaystackChargeSuccessData) {
+  const reference = data.reference?.trim();
+
+  if (!reference) {
+    throw new Error("charge.success: missing reference");
+  }
+
+  /* ---------- Look for a local payment ---------- */
+
+  const [payment] = await db
+    .select()
+    .from(payments)
+    .where(eq(payments.reference, reference))
+    .limit(1);
+
+  /* ---------- Case A: initial payment (payment row exists) ---------- */
+
+  if (payment) {
+    /* Idempotency: already processed */
+    if (payment.status === "successful" && payment.subscriptionId) {
+      return;
+    }
+
+    /* Verify with Paystack */
+    const verification = await verifyTransaction(reference);
+    const transaction = verification.data;
+
+    /* Validate amount / currency / status */
+    validatePaystackPayment({
+      paystackAmount: transaction.amount,
+      expectedAmount: payment.amount,
+      paystackCurrency: transaction.currency,
+      expectedCurrency: payment.currency,
+      paystackStatus: transaction.status,
+    });
+
+    /* Reference sanity check */
+    if (transaction.reference !== payment.reference) {
+      throw new Error(
+        `charge.success: reference mismatch (expected ${payment.reference}, got ${transaction.reference})`
+      );
+    }
+
+    /* Mark payment successful */
+    const [updatedPayment] = await db
+      .update(payments)
+      .set({
+        status: "successful",
+        paidAt: transaction.paid_at
+          ? new Date(transaction.paid_at)
+          : new Date(),
+        providerTransactionId:
+          transaction.id !== undefined
+            ? String(transaction.id)
+            : payment.providerTransactionId,
+        updatedAt: new Date(),
+      })
+      .where(eq(payments.id, payment.id))
+      .returning();
+
+    if (!updatedPayment) {
+      throw new Error("charge.success: failed to update payment");
+    }
+
+    /* Activate the subscription */
+    await activateSubscription({
+      paymentId: updatedPayment.id,
+      userId: updatedPayment.userId,
+    });
+
+    return;
+  }
+
+  /* ---------- Case B: renewal (no local payment row) ---------- */
+
+  /*
+   * Paystack generates a NEW reference for each recurring charge.
+   *
+   * We match the renewal to the user's subscription by
+   * customer_code (sent in the charge.success payload).
+   */
+
+  const customerCode = data.customer?.customer_code;
+  const subscriptionCode = data.subscription?.subscription_code;
+
+  if (!customerCode && !subscriptionCode) {
+    console.error(
+      "charge.success renewal: no customer_code or subscription_code in payload",
+      { reference, email: data.customer?.email }
+    );
+    /* Acknowledge but don't process — nothing to match on. */
+    return;
+  }
+
+  /* Find the subscription by subscription code first, then by customer code */
+
+  let existingSubscription;
+
+  if (subscriptionCode) {
+    [existingSubscription] = await db
+      .select()
+      .from(subscriptions)
+      .where(eq(subscriptions.paystackSubscriptionCode, subscriptionCode))
+      .limit(1);
+  }
+
+  if (!existingSubscription && customerCode) {
+    [existingSubscription] = await db
+      .select()
+      .from(subscriptions)
+      .where(eq(subscriptions.paystackCustomerCode, customerCode))
+      .orderBy(desc(subscriptions.createdAt))
+      .limit(1);
+  }
+
+  if (!existingSubscription) {
+    console.error(
+      "charge.success renewal: no matching subscription found",
+      { reference, customerCode, subscriptionCode }
+    );
+    return;
+  }
+
+  /* Verify with Paystack */
+  const verification = await verifyTransaction(reference);
+  const transaction = verification.data;
+
+  if (transaction.status !== "success") {
+    console.error(
+      "charge.success renewal: transaction not successful",
+      { reference, status: transaction.status }
+    );
+    return;
+  }
+
+  /* Load the plan for the subscription */
+  const [plan] = await db
+    .select()
+    .from(plans)
+    .where(eq(plans.id, existingSubscription.planId))
+    .limit(1);
+
+  if (!plan) {
+    throw new Error("charge.success renewal: plan not found");
+  }
+
+  /* Validate the amount matches the plan price */
+  const paidAmount = Math.round(Number(transaction.amount));
+  const planPrice = Math.round(Number(plan.price));
+
+  if (paidAmount !== planPrice) {
+    console.error(
+      "charge.success renewal: amount mismatch",
+      { paidAmount, planPrice, reference }
+    );
+    /* Don't extend — flag for manual review */
+    return;
+  }
+
+  /* Create a payments row for the renewal */
+
+  await db.insert(payments).values({
+    userId: existingSubscription.userId,
+    subscriptionId: existingSubscription.id,
+    provider: "paystack",
+    reference: transaction.reference,
+    amount: String(transaction.amount),
+    currency: transaction.currency,
+    status: "successful",
+    paidAt: transaction.paid_at
+      ? new Date(transaction.paid_at)
+      : new Date(),
+    providerTransactionId:
+      transaction.id !== undefined ? String(transaction.id) : null,
+    metadata: {
+      planId: plan.id,
+      planSlug: plan.slug,
+      type: "renewal",
+    },
+  });
+
+  /* Extend the subscription */
+
+    await extendSubscriptionFromRenewal({
+    subscriptionId: existingSubscription.id,
+    planInterval: plan.interval,
+    renewalReference: reference,
+  });
+
+    //   await extendSubscriptionFromRenewal({
+    //     subscriptionId: existingSubscription.id,
+    //     planInterval: plan.interval,
+    //   });
+}
+
+/* =========================================================
+   HANDLER — subscription.create
+   =========================================================
+ *
+ * Paystack fires this after the FIRST successful charge of a
+ * recurring subscription. We use it to store the Paystack
+ * subscription code and email token — needed later to cancel
+ * or query the subscription.
+ * ========================================================= */
+
+async function handleSubscriptionCreate(data: PaystackSubscriptionData) {
+  const subscriptionCode = data.subscription_code;
+  const emailToken = data.email_token;
+  const customerCode = data.customer?.customer_code;
+
+  if (!subscriptionCode) {
+    throw new Error("subscription.create: missing subscription_code");
+  }
+
+  /* Find the subscription by customer code (most reliable) */
+
+  if (!customerCode) {
+    console.error("subscription.create: missing customer_code");
+    return;
+  }
+
+  const [existing] = await db
+    .select()
+    .from(subscriptions)
+    .where(eq(subscriptions.paystackCustomerCode, customerCode))
+    .orderBy(desc(subscriptions.createdAt))
+    .limit(1);
+
+  if (!existing) {
+    /*
+     * This can happen if subscription.create arrives before
+     * the initial charge.success has been processed.
+     *
+     * Paystack retries webhooks, so we'll get it again.
+     * Throw so the retry happens.
+     */
+
+    throw new Error(
+      "subscription.create: no matching subscription yet — will retry"
+    );
+  }
+
+  await db
+    .update(subscriptions)
+    .set({
+      paystackSubscriptionCode: subscriptionCode,
+      paystackEmailToken: emailToken ?? existing.paystackEmailToken,
+      updatedAt: new Date(),
+    })
+    .where(eq(subscriptions.id, existing.id));
+}
+
+/* =========================================================
+   HANDLER — subscription.not_renew
+   =========================================================
+ *
+ * User disabled auto-renewal from Paystack's portal.
+ * The subscription remains active until endsAt, then expires.
+ * ========================================================= */
+
+async function handleSubscriptionNotRenew(
+  data: PaystackSubscriptionData
+) {
+  const subscriptionCode = data.subscription_code;
+
+  if (!subscriptionCode) {
+    throw new Error("subscription.not_renew: missing subscription_code");
+  }
+
+  const [existing] = await db
+    .select()
+    .from(subscriptions)
+    .where(eq(subscriptions.paystackSubscriptionCode, subscriptionCode))
+    .limit(1);
+
+  if (!existing) {
+    console.error(
+      "subscription.not_renew: no matching subscription",
+      { subscriptionCode }
+    );
+    return;
+  }
+
+  /* Idempotency: already marked */
+  if (existing.status === "non_renewing") {
+    return;
+  }
+
+  await db
+    .update(subscriptions)
+    .set({
+      status: "non_renewing",
+      cancelledAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(subscriptions.id, existing.id));
+}
+
+/* =========================================================
+   HANDLER — subscription.disable
+   =========================================================
+ *
+ * Subscription fully disabled (either by user or Paystack).
+ * Access should be revoked immediately.
+ * ========================================================= */
+
+async function handleSubscriptionDisable(data: PaystackSubscriptionData) {
+  const subscriptionCode = data.subscription_code;
+
+  if (!subscriptionCode) {
+    throw new Error("subscription.disable: missing subscription_code");
+  }
+
+  const [existing] = await db
+    .select()
+    .from(subscriptions)
+    .where(eq(subscriptions.paystackSubscriptionCode, subscriptionCode))
+    .limit(1);
+
+  if (!existing) {
+    console.error(
+      "subscription.disable: no matching subscription",
+      { subscriptionCode }
+    );
+    return;
+  }
+
+  /* Idempotency: already disabled */
+  if (existing.status === "cancelled") {
+    return;
+  }
+
+  await db
+    .update(subscriptions)
+    .set({
+      status: "cancelled",
+      cancelledAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(subscriptions.id, existing.id));
+}
+
+/* =========================================================
+   HANDLER — invoice.payment_failed
+   =========================================================
+ *
+ * A renewal charge failed (expired card, insufficient funds).
+ * Paystack retries automatically for a few days.
+ * ========================================================= */
+
+async function handleInvoicePaymentFailed(data: PaystackInvoiceData) {
+  const subscriptionCode = data.subscription?.subscription_code;
+
+  if (!subscriptionCode) {
+    throw new Error("invoice.payment_failed: missing subscription_code");
+  }
+
+  const [existing] = await db
+    .select()
+    .from(subscriptions)
+    .where(eq(subscriptions.paystackSubscriptionCode, subscriptionCode))
+    .limit(1);
+
+  if (!existing) {
+    console.error(
+      "invoice.payment_failed: no matching subscription",
+      { subscriptionCode }
+    );
+    return;
+  }
+
+  await db
+    .update(subscriptions)
+    .set({
+      status: "past_due",
+      updatedAt: new Date(),
+    })
+    .where(eq(subscriptions.id, existing.id));
+
+  /* TODO: send the user an email prompting them to update their card. */
+  console.warn(
+    "invoice.payment_failed: user needs to update payment method",
+    {
+      subscriptionId: existing.id,
+      userId: existing.userId,
+      subscriptionCode,
+    }
+  );
 }
