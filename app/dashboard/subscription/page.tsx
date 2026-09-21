@@ -20,21 +20,71 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
 }
 
+function daysUntil(date: Date): number {
+  const ms = date.getTime() - Date.now();
+  return Math.ceil(ms / (1000 * 60 * 60 * 24));
+}
+
 /* =========================================================
-   SUB-COMPONENTS
+   USAGE BAR
 ========================================================= */
 
 function UsageBar({
   label,
   used,
   limit,
+  hint,
 }: {
   label: string;
   used: number;
   limit: number;
+  hint?: string;
 }) {
+  /*
+   * Special case: the plan does not include this feature.
+   * A limit of 0 means "not available", not "fully used".
+   */
+  if (limit === 0) {
+    return (
+      <div
+        className="rounded-xl border p-5"
+        style={{
+          borderColor: "var(--border)",
+          background: "var(--surface)",
+        }}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="metric-label">{label}</div>
+            <div
+              className="mt-2 text-lg font-bold"
+              style={{ color: "var(--text-subtle)" }}
+            >
+              Not included
+            </div>
+          </div>
+
+          <span className="stripe-badge stripe-badge-neutral">
+            Upgrade
+          </span>
+        </div>
+
+        <p
+          className="mt-3 text-xs leading-relaxed"
+          style={{ color: "var(--text-muted)" }}
+        >
+          This feature is not part of your current plan.
+        </p>
+      </div>
+    );
+  }
+
   const percentage =
-    limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+    limit > 0
+      ? Math.min(100, Math.round((used / limit) * 100))
+      : 0;
+
+  const remaining = Math.max(0, limit - used);
 
   const barColor =
     percentage >= 90
@@ -46,7 +96,10 @@ function UsageBar({
   return (
     <div
       className="rounded-xl border p-5"
-      style={{ borderColor: "var(--border)", background: "var(--surface)" }}
+      style={{
+        borderColor: "var(--border)",
+        background: "var(--surface)",
+      }}
     >
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -81,7 +134,10 @@ function UsageBar({
       </div>
 
       <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>
-        {Math.max(0, limit - used)} remaining
+        {remaining > 0
+          ? `${formatNumber(remaining)} remaining`
+          : "None remaining this period"}
+        {hint ? ` · ${hint}` : ""}
       </p>
     </div>
   );
@@ -100,7 +156,13 @@ export default async function SubscriptionPage() {
 
   const summary = await getUsageSummary(user.id);
 
+  console.log(
+  "[subscription-debug]",
+  JSON.stringify(summary, null, 2)
+);
+
   /* ---------- NO SUBSCRIPTION ---------- */
+
   if (!summary.subscription || !summary.plan) {
     return (
       <div className="flex flex-col gap-6">
@@ -167,6 +229,7 @@ export default async function SubscriptionPage() {
   }
 
   /* ---------- ACTIVE SUBSCRIPTION ---------- */
+
   const plan = summary.plan;
   const subscription = summary.subscription;
   const usage = summary.usage;
@@ -176,7 +239,17 @@ export default async function SubscriptionPage() {
   const aiRecommendationsUsed = usage?.aiRecommendationsUsed ?? 0;
 
   const isActive =
-    subscription.status === "active" && subscription.endsAt > new Date();
+    subscription.status === "active" &&
+    subscription.endsAt > new Date();
+
+  const daysLeft = daysUntil(subscription.endsAt);
+  const expiringSoon =
+    isActive && daysLeft > 0 && daysLeft <= 7;
+  const expired = !isActive;
+
+  /* ---------- Expiry math for audits hint ---------- */
+
+  const auditsRemaining = Math.max(0, plan.auditLimit - auditsUsed);
 
   return (
     <div className="flex flex-col gap-6">
@@ -207,7 +280,76 @@ export default async function SubscriptionPage() {
         </div>
       </div>
 
-      {/* Current plan */}
+      {/* ---------- Expiry warning ---------- */}
+
+      {expiringSoon && (
+        <div className="stripe-alert stripe-alert-warning">
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ flexShrink: 0, marginTop: 1 }}
+            aria-hidden="true"
+          >
+            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            <line x1="12" y1="9" x2="12" y2="13" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          <div>
+            <div className="font-semibold">
+              Your subscription expires in {daysLeft} day
+              {daysLeft === 1 ? "" : "s"}
+            </div>
+            <div className="mt-0.5">
+              Renew now to keep running audits without interruption.{" "}
+              <Link href="/pricing" className="stripe-link">
+                Choose a plan
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {expired && (
+        <div className="stripe-alert stripe-alert-danger">
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ flexShrink: 0, marginTop: 1 }}
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <div>
+            <div className="font-semibold">
+              Your subscription has expired
+            </div>
+            <div className="mt-0.5">
+              Renew to regain access to audits, projects, and AI
+              recommendations.{" "}
+              <Link href="/pricing" className="stripe-link">
+                Choose a plan
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------- Current plan ---------- */}
+
       <section className="stripe-panel overflow-hidden">
         <header
           className="border-b px-6 py-6"
@@ -269,7 +411,8 @@ export default async function SubscriptionPage() {
           </div>
         </header>
 
-        <div className="grid grid-cols-1 divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0"
+        <div
+          className="grid grid-cols-1 divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0"
           style={{ borderColor: "var(--border-light)" }}
         >
           <div className="p-6">
@@ -318,13 +461,16 @@ export default async function SubscriptionPage() {
               className="mt-1 text-sm"
               style={{ color: "var(--text-muted)" }}
             >
-              Current subscription period
+              {isActive && daysLeft > 0
+                ? `${daysLeft} day${daysLeft === 1 ? "" : "s"} remaining`
+                : "Subscription ended"}
             </div>
           </div>
         </div>
       </section>
 
-      {/* Usage */}
+      {/* ---------- Usage ---------- */}
+
       <section>
         <header className="mb-4">
           <h2 className="section-title">Usage</h2>
@@ -334,49 +480,74 @@ export default async function SubscriptionPage() {
         </header>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          {/* SEO audits — this is the primary metric */}
           <UsageBar
             label="SEO audits"
             used={auditsUsed}
             limit={plan.auditLimit}
+            hint={
+              auditsRemaining > 0 && auditsRemaining <= 5
+                ? "Running low"
+                : undefined
+            }
           />
 
+          {/* Projects — concurrent, not per-period */}
           <UsageBar
             label="Projects"
             used={summary.projectsUsed}
             limit={plan.maxProjects}
+            hint="Active projects"
           />
 
+          {/* AI recommendations — 0 means "not included" */}
           <UsageBar
             label="AI recommendations"
             used={aiRecommendationsUsed}
             limit={plan.aiRecommendationLimit}
+            hint={
+              plan.aiRecommendationLimit > 0
+                ? "Per subscription period"
+                : undefined
+            }
           />
 
+          {/* Pages crawled — reporting metric, no period limit */}
           <div
             className="rounded-xl border p-5"
-            style={{ borderColor: "var(--border)", background: "var(--surface)" }}
+            style={{
+              borderColor: "var(--border)",
+              background: "var(--surface)",
+            }}
           >
-            <div className="metric-label">Pages crawled</div>
-
-            <div
-              className="mt-2 text-lg font-bold tabular-nums"
-              style={{ color: "var(--text-primary)" }}
-            >
-              {formatNumber(pagesCrawled)}
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="metric-label">Pages crawled</div>
+                <div className="mt-2 text-lg font-bold tabular-nums">
+                  <span style={{ color: "var(--text-primary)" }}>
+                    {formatNumber(pagesCrawled)}
+                  </span>
+                </div>
+              </div>
             </div>
 
             <p
-              className="mt-2 text-xs leading-relaxed"
+              className="mt-3 text-xs leading-relaxed"
               style={{ color: "var(--text-muted)" }}
             >
-              Reporting metric. Each audit is limited to{" "}
-              {formatNumber(plan.pagesPerAudit)} pages.
+              Cumulative across all audits this period. Each audit is
+              limited to{" "}
+              <strong style={{ color: "var(--text-secondary)" }}>
+                {formatNumber(plan.pagesPerAudit)}
+              </strong>{" "}
+              pages.
             </p>
           </div>
         </div>
       </section>
 
-      {/* Plan limits */}
+      {/* ---------- Plan limits ---------- */}
+
       <section>
         <header className="mb-4">
           <h2 className="section-title">Plan limits</h2>
@@ -446,14 +617,17 @@ export default async function SubscriptionPage() {
                 className="text-sm font-semibold tabular-nums"
                 style={{ color: "var(--text-primary)" }}
               >
-                {formatNumber(plan.aiRecommendationLimit)}
+                {plan.aiRecommendationLimit === 0
+                  ? "Not included"
+                  : formatNumber(plan.aiRecommendationLimit)}
               </span>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Upgrade CTA */}
+      {/* ---------- Upgrade CTA ---------- */}
+
       <section className="stripe-panel">
         <div className="flex flex-col gap-5 px-6 py-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
