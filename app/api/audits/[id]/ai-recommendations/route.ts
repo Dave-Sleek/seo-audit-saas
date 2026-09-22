@@ -10,7 +10,37 @@ import {
   projects,
 } from "@/app/db/schema";
 
-import { generateSEORecommendations } from "@/app/lib/ai/gemini";
+import {
+  generateSEORecommendations,
+  AIRecommendationError,
+} from "@/app/lib/ai/gemini";
+
+import {
+  checkAIRecommendationLimit,
+  consumeAIRecommendation,
+  refundAIRecommendation,
+} from "@/app/lib/usage";
+
+/**
+ * Parse a value from the audits.ai_recommendations column.
+ *
+ * The column may be typed as jsonb (driver returns an object)
+ * or text (driver returns a JSON string). Handle both so the
+ * cached-return path works regardless of how it was written.
+ */
+function parseAIRecommendations(value: unknown) {
+  if (value == null) return null;
+
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+
+  return value;
+}
 
 export async function POST(
   request: Request,
@@ -25,12 +55,8 @@ export async function POST(
 
     if (!user) {
       return NextResponse.json(
-        {
-          error: "Authentication required.",
-        },
-        {
-          status: 401,
-        }
+        { error: "Authentication required." },
+        { status: 401 }
       );
     }
 
@@ -58,12 +84,8 @@ export async function POST(
 
     if (!result) {
       return NextResponse.json(
-        {
-          error: "Audit not found.",
-        },
-        {
-          status: 404,
-        }
+        { error: "Audit not found." },
+        { status: 404 }
       );
     }
 
@@ -72,25 +94,51 @@ export async function POST(
 
     /*
      * If recommendations already exist, return them instead of
-     * making another Gemini request.
+     * making another Gemini request. This does NOT consume a
+     * credit — it's a pure cache read.
      */
     let regenerate = false;
 
     try {
-    const body = await request.json();
-    regenerate = body?.regenerate === true;
+      const body = await request.json();
+      regenerate = body?.regenerate === true;
     } catch {
-    // Empty request body is allowed.
+      // Empty request body is allowed.
     }
 
     if (audit.aiRecommendations && !regenerate) {
+      const cached = parseAIRecommendations(
+        audit.aiRecommendations
+      );
+
       return NextResponse.json({
         success: true,
         cached: true,
-        recommendations: audit.aiRecommendations,
+        recommendations: cached,
         generatedAt: audit.aiGeneratedAt,
         model: audit.aiModel,
       });
+    }
+
+    /*
+     * Preflight — cheap read, no side effects. Returns 402
+     * with used/limit/remaining so the UI can show a helpful
+     * quota message without doing expensive work.
+     */
+    const preflight = await checkAIRecommendationLimit(user.id);
+
+    if (!preflight.allowed) {
+      return NextResponse.json(
+        {
+          error:
+            preflight.message ??
+            "You have reached your AI recommendation limit.",
+          used: preflight.used,
+          limit: preflight.limit,
+          remaining: preflight.remaining,
+        },
+        { status: 402 }
+      );
     }
 
     const pages = await db
@@ -109,8 +157,37 @@ export async function POST(
       pages.map((page) => [page.id, page])
     );
 
-    const recommendations =
-      await generateSEORecommendations({
+    /*
+     * Reserve the credit BEFORE calling Gemini. This is the
+     * authoritative increment — it closes the race where two
+     * concurrent requests both pass the preflight and both
+     * call Gemini.
+     */
+    const reservation = await consumeAIRecommendation(user.id);
+
+    if (!reservation.allowed) {
+      return NextResponse.json(
+        {
+          error:
+            reservation.message ??
+            "You have reached your AI recommendation limit.",
+          used: reservation.used,
+          limit: reservation.limit,
+          remaining: reservation.remaining,
+        },
+        { status: 402 }
+      );
+    }
+
+    /*
+     * Everything that can fail after the reservation goes
+     * inside this try/catch so we can refund the credit if
+     * anything goes wrong — Gemini failure OR persistence
+     * failure. The audit write is inside the try so a JSON
+     * serialization error doesn't leak a charged credit.
+     */
+    try {
+      const recommendations = await generateSEORecommendations({
         domain: project.domain,
         auditUrl: audit.url,
 
@@ -190,44 +267,95 @@ export async function POST(
         })),
       });
 
-    const generatedAt = new Date();
+      const generatedAt = new Date();
 
-    const model =
-      process.env.GEMINI_MODEL?.trim() ||
-      "gemini-3.8-flash";
+      const model =
+        process.env.GEMINI_MODEL?.trim() ||
+        "gemini-3.6-flash";
 
-    await db
-      .update(audits)
-      .set({
-        aiRecommendations: recommendations,
-        aiGeneratedAt: generatedAt,
-        aiModel: model,
-      })
-      .where(eq(audits.id, audit.id));
+      /*
+       * Stringify before writing.
+       *
+       * If the column is jsonb, Postgres casts the string back
+       * to jsonb. If it's text, it stores the JSON as a string.
+       * Either way, we stop the driver from trying to coerce a
+       * raw JS object into a type it doesn't know how to bind,
+       * which was causing the "Failed query" error.
+       */
+      await db
+        .update(audits)
+        .set({
+          // aiRecommendations: JSON.stringify(recommendations),
+          aiRecommendations: recommendations,
+          aiGeneratedAt: generatedAt,
+          aiModel: model,
+        })
+        .where(eq(audits.id, audit.id));
 
-    return NextResponse.json({
-      success: true,
-      cached: false,
-      recommendations,
-      generatedAt,
-      model,
-    });
+      return NextResponse.json({
+        success: true,
+        cached: false,
+        recommendations,
+        generatedAt,
+        model,
+      });
+    } catch (error) {
+      /*
+       * Refund on any failure after reservation: Gemini call
+       * failed, JSON.stringify threw, or the DB write failed.
+       * Log for debugging, but don't let a refund failure mask
+       * the original error.
+       */
+      console.error(
+        "[ai-recs] generation or persistence failed; refunding credit:",
+        error
+      );
+
+      try {
+        await refundAIRecommendation(user.id);
+      } catch (refundError) {
+        console.error(
+          "[ai-recs] refund failed — user may have been charged for a failed generation:",
+          refundError
+        );
+      }
+
+      throw error;
+    }
   } catch (error) {
-    console.error(
-      "AI SEO recommendations API error:",
-      error
-    );
+    console.error("[ai-recs] request failed:", error);
 
+    /*
+     * If it's a classified AI error, its message is already
+     * user-safe. Return the appropriate status code.
+     */
+    if (error instanceof AIRecommendationError) {
+      const status =
+        error.code === "RATE_LIMITED"
+          ? 429
+          : error.code === "SERVICE_UNAVAILABLE"
+            ? 503
+            : error.code === "NOT_CONFIGURED"
+              ? 500
+              : 500;
+
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status }
+      );
+    }
+
+    /*
+     * Anything else (SQL errors, unexpected exceptions)
+     * should never leak internal details to the client.
+     * The full error is already logged above.
+     */
     return NextResponse.json(
       {
         error:
-          error instanceof Error
-            ? error.message
-            : "Unable to generate AI SEO recommendations.",
+          "Unable to generate AI recommendations. Please try again.",
       },
-      {
-        status: 500,
-      }
+      { status: 500 }
     );
   }
 }

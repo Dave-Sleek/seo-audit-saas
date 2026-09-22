@@ -683,7 +683,29 @@ export async function extendSubscriptionFromRenewal({
       );
     }
 
-    /* ---------- 2. Compute new period boundaries ---------- */
+    /* ---------- 2. Idempotency check by renewal reference ---------- */
+
+    /*
+     * If a usage row already carries this renewal reference,
+     * the renewal has been applied. Return early.
+     *
+     * This is the guard that makes repeat webhooks safe.
+     * The previous version compared period boundaries, but
+     * those shift on every call, so it never matched.
+     */
+    const [existingRenewal] = await tx
+      .select({ id: subscriptionUsage.id })
+      .from(subscriptionUsage)
+      .where(
+        eq(subscriptionUsage.renewalReference, renewalReference)
+      )
+      .limit(1);
+
+    if (existingRenewal) {
+      return;
+    }
+
+    /* ---------- 3. Compute new period boundaries ---------- */
 
     const now = new Date();
 
@@ -695,29 +717,6 @@ export async function extendSubscriptionFromRenewal({
     );
 
     const periodEnd = calculateEndDate(periodStart, planInterval);
-
-    /* ---------- 3. Idempotency check ---------- */
-
-    const [existingRenewalUsage] = await tx
-      .select({ id: subscriptionUsage.id })
-      .from(subscriptionUsage)
-      .where(
-        and(
-          eq(subscriptionUsage.subscriptionId, subscriptionId),
-          eq(subscriptionUsage.periodStart, periodStart),
-          eq(subscriptionUsage.periodEnd, periodEnd)
-        )
-      )
-      .limit(1);
-
-    if (existingRenewalUsage) {
-      /*
-       * Already extended. The webhook handler may still have
-       * created a payments row for this delivery — that's fine,
-       * we want a record of every charge.
-       */
-      return;
-    }
 
     /* ---------- 4. Extend the subscription ---------- */
 
@@ -731,7 +730,7 @@ export async function extendSubscriptionFromRenewal({
       })
       .where(eq(subscriptions.id, subscriptionId));
 
-    /* ---------- 5. Create usage period for new window ---------- */
+    /* ---------- 5. Create the new usage period ---------- */
 
     await tx
       .insert(subscriptionUsage)
@@ -743,12 +742,11 @@ export async function extendSubscriptionFromRenewal({
         auditsUsed: 0,
         pagesCrawled: 0,
         aiRecommendationsUsed: 0,
+        renewalReference,
       })
       .onConflictDoNothing({
         target: [
-          subscriptionUsage.subscriptionId,
-          subscriptionUsage.periodStart,
-          subscriptionUsage.periodEnd,
+          subscriptionUsage.renewalReference,
         ],
       });
 

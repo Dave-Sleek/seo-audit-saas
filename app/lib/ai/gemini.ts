@@ -1,5 +1,9 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
+/* =========================================================
+   CLIENT
+========================================================= */
+
 const apiKey = process.env.GEMINI_API_KEY;
 
 if (!apiKey) {
@@ -13,6 +17,10 @@ const ai = apiKey
       apiKey,
     })
   : null;
+
+/* =========================================================
+   TYPES
+========================================================= */
 
 export type AIRecommendation = {
   title: string;
@@ -31,6 +39,53 @@ export type AISEORecommendations = {
   quickWins: string[];
   technicalNotes: string[];
 };
+
+export type AIRecommendationErrorCode =
+  | "NOT_CONFIGURED"
+  | "RATE_LIMITED"
+  | "SERVICE_UNAVAILABLE"
+  | "INVALID_RESPONSE"
+  | "UNKNOWN";
+
+export class AIRecommendationError extends Error {
+  code: AIRecommendationErrorCode;
+
+  constructor(code: AIRecommendationErrorCode, message: string) {
+    super(message);
+    this.name = "AIRecommendationError";
+    this.code = code;
+  }
+}
+
+/* =========================================================
+   MODEL FALLBACK CHAIN
+========================================================= */
+
+/**
+ * Preferred model comes from GEMINI_MODEL, with a stable default.
+ * The remaining entries are fallbacks used only when the primary
+ * model returns 404 (deprecated), 429 (rate limited), or 503
+ * (overloaded).
+ *
+ * Google rotates model names frequently — keep the tail of this
+ * list to 1–2 currently-supported Flash models.
+ */
+function getModelChain(): string[] {
+  const primary =
+    process.env.GEMINI_MODEL?.trim() || "gemini-3.6-flash";
+
+  const fallbacks = [
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+  ];
+
+  // De-duplicate in case GEMINI_MODEL matches a fallback.
+  return Array.from(new Set([primary, ...fallbacks]));
+}
+
+/* =========================================================
+   RESPONSE SCHEMA
+========================================================= */
 
 const responseSchema = {
   type: Type.OBJECT,
@@ -122,6 +177,219 @@ const responseSchema = {
   ],
 };
 
+/* =========================================================
+   ERROR PARSING
+========================================================= */
+
+type GeminiErrorBody = {
+  code?: number;
+  status?: string;
+  details?: unknown[];
+};
+
+/**
+ * @google/genai wraps Google's structured error as an ApiError whose
+ * `message` string contains the raw JSON body:
+ *
+ *   Error [ApiError]: {"error":{"code":503,"status":"UNAVAILABLE",...}}
+ *
+ * Top-level fields on the error object are unreliable — sometimes
+ * only the HTTP status number is exposed. This helper extracts the
+ * underlying Google error object from whichever shape is present.
+ */
+function getGeminiErrorBody(error: unknown): GeminiErrorBody {
+  if (!error || typeof error !== "object") return {};
+
+  const e = error as {
+    code?: number;
+    status?: number | string;
+    message?: string;
+    details?: unknown;
+  };
+
+  // 1. Structured top-level details (newer SDK versions).
+  if (Array.isArray(e.details)) {
+    return {
+      code: typeof e.code === "number" ? e.code : undefined,
+      status:
+        typeof e.status === "string" ? e.status : undefined,
+      details: e.details,
+    };
+  }
+
+  // 2. Parse the JSON body out of message.
+  if (typeof e.message === "string") {
+    const jsonStart = e.message.indexOf("{");
+
+    if (jsonStart !== -1) {
+      try {
+        const parsed = JSON.parse(e.message.slice(jsonStart));
+        const inner =
+          parsed && typeof parsed === "object" && "error" in parsed
+            ? (parsed as { error: unknown }).error
+            : parsed;
+
+        if (inner && typeof inner === "object") {
+          const obj = inner as {
+            code?: unknown;
+            status?: unknown;
+            details?: unknown;
+          };
+
+          return {
+            code:
+              typeof obj.code === "number" ? obj.code : undefined,
+            status:
+              typeof obj.status === "string" ? obj.status : undefined,
+            details: Array.isArray(obj.details)
+              ? obj.details
+              : undefined,
+          };
+        }
+      } catch {
+        // fall through to regex
+      }
+    }
+
+    // 3. Regex fallback for the common shapes.
+    const statusMatch = e.message.match(/"status"\s*:\s*"([A-Z_]+)"/);
+    const codeMatch = e.message.match(/"code"\s*:\s*(\d+)/);
+
+    if (statusMatch || codeMatch) {
+      return {
+        status: statusMatch?.[1],
+        code: codeMatch ? Number(codeMatch[1]) : undefined,
+      };
+    }
+  }
+
+  // 4. Last resort: the HTTP status number.
+  if (typeof e.status === "number") {
+    return { code: e.status };
+  }
+
+  return {};
+}
+
+function isRateLimitError(error: unknown): boolean {
+  const { code, status } = getGeminiErrorBody(error);
+
+  return code === 429 || status === "RESOURCE_EXHAUSTED";
+}
+
+function isTransientError(error: unknown): boolean {
+  const { code, status } = getGeminiErrorBody(error);
+
+  return (
+    code === 500 ||
+    code === 502 ||
+    code === 503 ||
+    code === 504 ||
+    status === "INTERNAL" ||
+    status === "UNAVAILABLE" ||
+    status === "DEADLINE_EXCEEDED"
+  );
+}
+
+function isModelNotFoundError(error: unknown): boolean {
+  const { code, status } = getGeminiErrorBody(error);
+
+  return code === 404 || status === "NOT_FOUND";
+}
+
+/**
+ * Pull the RetryInfo.retryDelay value (e.g. "34.234011591s") from
+ * the structured error body, if present.
+ */
+function extractRetryDelayMs(error: unknown): number | null {
+  const { details } = getGeminiErrorBody(error);
+
+  if (!Array.isArray(details)) return null;
+
+  for (const detail of details) {
+    if (!detail || typeof detail !== "object") continue;
+
+    const entry = detail as {
+      "@type"?: string;
+      retryDelay?: string;
+    };
+
+    if (
+      entry["@type"] ===
+        "type.googleapis.com/google.rpc.RetryInfo" &&
+      typeof entry.retryDelay === "string"
+    ) {
+      const match = entry.retryDelay.match(/^([\d.]+)s$/);
+
+      if (match) {
+        return Math.ceil(parseFloat(match[1]) * 1000);
+      }
+    }
+  }
+
+  return null;
+}
+
+/* =========================================================
+   RETRY
+========================================================= */
+
+/**
+ * Call Gemini with retry-on-transient-failure semantics.
+ *
+ * - Permanent errors (bad request, auth, invalid arg) are re-thrown
+ *   immediately so callers get fast feedback.
+ * - 429 and 5xx are retried with exponential backoff, capped, and
+ *   honour Google's own retryDelay when present.
+ */
+async function callGeminiWithRetry(
+  client: GoogleGenAI,
+  params: Parameters<typeof client.models.generateContent>[0],
+  maxAttempts = 4
+): Promise<Awaited<ReturnType<typeof client.models.generateContent>>> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await client.models.generateContent(params);
+    } catch (error) {
+      lastError = error;
+
+      const retriable =
+        isRateLimitError(error) || isTransientError(error);
+
+      if (!retriable || attempt === maxAttempts) {
+        throw error;
+      }
+
+      const suggested = extractRetryDelayMs(error);
+
+      const backoffMs = Math.min(
+        2000 * Math.pow(2, attempt - 1),
+        30000
+      );
+
+      const delayMs = suggested ?? backoffMs;
+
+      console.warn(
+        `[ai] Gemini call failed (attempt ${attempt}/${maxAttempts}), ` +
+          `retrying in ${delayMs}ms`,
+        isRateLimitError(error) ? "(rate limit)" : "(transient)"
+      );
+
+      await new Promise((resolve) =>
+        setTimeout(resolve, delayMs)
+      );
+    }
+  }
+
+  throw lastError;
+}
+
+/* =========================================================
+   MAIN
+========================================================= */
+
 export async function generateSEORecommendations(input: {
   domain: string;
   auditUrl: string;
@@ -170,13 +438,11 @@ export async function generateSEORecommendations(input: {
   }[];
 }): Promise<AISEORecommendations> {
   if (!ai) {
-    throw new Error(
-      "Gemini API is not configured. Add GEMINI_API_KEY to your environment variables."
+    throw new AIRecommendationError(
+      "NOT_CONFIGURED",
+      "AI recommendations are not available right now."
     );
   }
-
-  const model =
-    process.env.GEMINI_MODEL?.trim() || "gemini-3.8-flash";
 
   /*
    * Keep the AI context compact.
@@ -264,123 +530,185 @@ ${JSON.stringify(payload, null, 2)}
 Generate a professional SEO action plan based strictly on this data.
 `;
 
-  try {
-    const response = await ai.models.generateContent({
-      model,
+  /*
+   * Try the preferred model, then fall back on 404 / 429 / 5xx.
+   * Permanent errors are re-thrown immediately so we don't waste
+   * time cycling through models for a bad-request failure.
+   */
+  const models = getModelChain();
 
-      contents: prompt,
+  let response:
+    | Awaited<ReturnType<typeof ai.models.generateContent>>
+    | null = null;
 
-      config: {
-        temperature: 0.2,
+  let lastError: unknown = null;
 
-        responseMimeType: "application/json",
-
-        responseSchema,
-      },
-    });
-
-    const text = response.text?.trim();
-
-    if (!text) {
-      throw new Error("Gemini returned an empty response.");
-    }
-
-    let parsed: unknown;
-
+  for (const model of models) {
     try {
-      parsed = JSON.parse(text);
-    } catch {
-      throw new Error("Gemini returned invalid JSON.");
+      response = await callGeminiWithRetry(ai, {
+        model,
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema,
+        },
+      });
+
+      if (models[0] !== model) {
+        console.warn(
+          `[ai] Fell back to model "${model}" after primary failure.`
+        );
+      }
+
+      break;
+    } catch (error) {
+      lastError = error;
+
+      const switchable =
+        isModelNotFoundError(error) ||
+        isRateLimitError(error) ||
+        isTransientError(error);
+
+      if (!switchable) {
+        // Permanent error — stop trying other models.
+        break;
+      }
+
+      console.warn(
+        `[ai] Model "${model}" failed; trying next fallback.`
+      );
     }
+  }
 
-    if (!parsed || typeof parsed !== "object") {
-      throw new Error("Gemini returned an invalid recommendation object.");
-    }
+  if (!response) {
+    console.error("[ai] Gemini request failed:", lastError);
 
-    const result = parsed as AISEORecommendations;
-
-    if (
-      typeof result.summary !== "string" ||
-      !Array.isArray(result.recommendations) ||
-      !Array.isArray(result.quickWins) ||
-      !Array.isArray(result.technicalNotes)
-    ) {
-      throw new Error(
-        "Gemini returned an unexpected recommendation structure."
+    if (isRateLimitError(lastError)) {
+      throw new AIRecommendationError(
+        "RATE_LIMITED",
+        "The AI service is busy right now. Please try again in a minute."
       );
     }
 
-    return {
-      summary: result.summary.trim(),
-
-      recommendations: result.recommendations
-        .slice(0, 8)
-        .map((recommendation) => ({
-          title: String(recommendation.title || "").trim(),
-
-          priority:
-            recommendation.priority === "high" ||
-            recommendation.priority === "medium" ||
-            recommendation.priority === "low"
-              ? recommendation.priority
-              : "medium",
-
-          category: String(recommendation.category || "SEO").trim(),
-
-          problem: String(recommendation.problem || "").trim(),
-
-          whyItMatters: String(
-            recommendation.whyItMatters || ""
-          ).trim(),
-
-          recommendation: String(
-            recommendation.recommendation || ""
-          ).trim(),
-
-          actionSteps: Array.isArray(recommendation.actionSteps)
-            ? recommendation.actionSteps
-                .map((step) => String(step).trim())
-                .filter(Boolean)
-                .slice(0, 6)
-            : [],
-
-          affectedPages: Array.isArray(
-            recommendation.affectedPages
-          )
-            ? recommendation.affectedPages
-                .map((page) => String(page).trim())
-                .filter(Boolean)
-                .slice(0, 20)
-            : [],
-        }))
-        .filter(
-          (recommendation) =>
-            recommendation.title &&
-            recommendation.problem &&
-            recommendation.recommendation
-        ),
-
-      quickWins: result.quickWins
-        .map((item) => String(item).trim())
-        .filter(Boolean)
-        .slice(0, 5),
-
-      technicalNotes: result.technicalNotes
-        .map((item) => String(item).trim())
-        .filter(Boolean)
-        .slice(0, 8),
-    };
-  } catch (error) {
-    console.error("Gemini SEO recommendation error:", error);
-
-    if (error instanceof Error) {
-      throw new Error(
-        `Unable to generate AI SEO recommendations: ${error.message}`
+    if (isTransientError(lastError)) {
+      throw new AIRecommendationError(
+        "SERVICE_UNAVAILABLE",
+        "The AI service is temporarily unavailable. Please try again shortly."
       );
     }
 
-    throw new Error(
+    if (isModelNotFoundError(lastError)) {
+      throw new AIRecommendationError(
+        "SERVICE_UNAVAILABLE",
+        "The AI service is temporarily unavailable. Please try again shortly."
+      );
+    }
+
+    throw new AIRecommendationError(
+      "UNKNOWN",
       "Unable to generate AI SEO recommendations."
     );
   }
+
+  const text = response.text?.trim();
+
+  if (!text) {
+    throw new AIRecommendationError(
+      "INVALID_RESPONSE",
+      "The AI service returned an empty response. Please try again."
+    );
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new AIRecommendationError(
+      "INVALID_RESPONSE",
+      "The AI service returned an unreadable response. Please try again."
+    );
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    throw new AIRecommendationError(
+      "INVALID_RESPONSE",
+      "The AI service returned an invalid recommendation payload. Please try again."
+    );
+  }
+
+  const result = parsed as AISEORecommendations;
+
+  if (
+    typeof result.summary !== "string" ||
+    !Array.isArray(result.recommendations) ||
+    !Array.isArray(result.quickWins) ||
+    !Array.isArray(result.technicalNotes)
+  ) {
+    throw new AIRecommendationError(
+      "INVALID_RESPONSE",
+      "The AI service returned an unexpected recommendation structure. Please try again."
+    );
+  }
+
+  return {
+    summary: result.summary.trim(),
+
+    recommendations: result.recommendations
+      .slice(0, 8)
+      .map((recommendation) => ({
+        title: String(recommendation.title || "").trim(),
+
+        priority:
+          recommendation.priority === "high" ||
+          recommendation.priority === "medium" ||
+          recommendation.priority === "low"
+            ? recommendation.priority
+            : "medium",
+
+        category: String(recommendation.category || "SEO").trim(),
+
+        problem: String(recommendation.problem || "").trim(),
+
+        whyItMatters: String(
+          recommendation.whyItMatters || ""
+        ).trim(),
+
+        recommendation: String(
+          recommendation.recommendation || ""
+        ).trim(),
+
+        actionSteps: Array.isArray(recommendation.actionSteps)
+          ? recommendation.actionSteps
+              .map((step) => String(step).trim())
+              .filter(Boolean)
+              .slice(0, 6)
+          : [],
+
+        affectedPages: Array.isArray(
+          recommendation.affectedPages
+        )
+          ? recommendation.affectedPages
+              .map((page) => String(page).trim())
+              .filter(Boolean)
+              .slice(0, 20)
+          : [],
+      }))
+      .filter(
+        (recommendation) =>
+          recommendation.title &&
+          recommendation.problem &&
+          recommendation.recommendation
+      ),
+
+    quickWins: result.quickWins
+      .map((item) => String(item).trim())
+      .filter(Boolean)
+      .slice(0, 5),
+
+    technicalNotes: result.technicalNotes
+      .map((item) => String(item).trim())
+      .filter(Boolean)
+      .slice(0, 8),
+  };
 }

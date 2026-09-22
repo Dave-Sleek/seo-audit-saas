@@ -3,6 +3,7 @@ import {
   eq,
   gt,
   lte,
+  inArray,
   sql,
 } from "drizzle-orm";
 
@@ -14,6 +15,21 @@ import {
   subscriptionUsage,
   subscriptions,
 } from "@/app/db/schema";
+
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
+/**
+ * Subscription statuses considered currently active.
+ *
+ * "non_renewing" means the user has cancelled auto-renewal
+ * but still has access until endsAt.
+ */
+const ACTIVE_SUBSCRIPTION_STATUSES = [
+  "active",
+  "non_renewing",
+] as const;
 
 /* =========================================================
    TYPES
@@ -131,6 +147,13 @@ type ReservationFailure = {
    INTERNAL HELPERS
 ========================================================= */
 
+/**
+ * Load the currently active subscription + plan for a user.
+ *
+ * "Active" includes both "active" and "non_renewing" — the
+ * latter means the user has cancelled auto-renewal but still
+ * has access until endsAt.
+ */
 async function getActiveSubscriptionWithPlan(userId: string) {
   const now = new Date();
 
@@ -143,7 +166,10 @@ async function getActiveSubscriptionWithPlan(userId: string) {
     .where(
       and(
         eq(subscriptions.userId, userId),
-        eq(subscriptions.status, "active"),
+        inArray(
+          subscriptions.status,
+          ACTIVE_SUBSCRIPTION_STATUSES
+        ),
         lte(subscriptions.endsAt, now)
       )
     );
@@ -158,7 +184,10 @@ async function getActiveSubscriptionWithPlan(userId: string) {
     .where(
       and(
         eq(subscriptions.userId, userId),
-        eq(subscriptions.status, "active"),
+        inArray(
+          subscriptions.status,
+          ACTIVE_SUBSCRIPTION_STATUSES
+        ),
         lte(subscriptions.startsAt, now),
         gt(subscriptions.endsAt, now)
       )
@@ -169,35 +198,57 @@ async function getActiveSubscriptionWithPlan(userId: string) {
   return result[0] ?? null;
 }
 
+/**
+ * Find or create the subscription_usage row for the
+ * *current* billing period.
+ *
+ * We deliberately do NOT match on
+ * (subscriptionId, subscription.startsAt, subscription.endsAt)
+ * because renewals extend the subscription's endsAt without
+ * touching startsAt. That means the exact-match approach stops
+ * finding the row after the first renewal and inserts a
+ * duplicate ghost row instead.
+ *
+ * Instead, we find the usage row whose period *contains now*.
+ *
+ * If no such row exists (first call for a new subscription),
+ * we create one using the subscription's initial period.
+ */
 async function ensureUsagePeriod(
   userId: string,
   subscriptionId: string,
-  periodStart: Date,
-  periodEnd: Date
+  subscriptionStartsAt: Date,
+  subscriptionEndsAt: Date
 ) {
-  const existing = await db
+  const now = new Date();
+
+  /* ---------- 1. Find the usage row for the current period ---------- */
+
+  const [current] = await db
     .select()
     .from(subscriptionUsage)
     .where(
       and(
         eq(subscriptionUsage.subscriptionId, subscriptionId),
-        eq(subscriptionUsage.periodStart, periodStart),
-        eq(subscriptionUsage.periodEnd, periodEnd)
+        lte(subscriptionUsage.periodStart, now),
+        gt(subscriptionUsage.periodEnd, now)
       )
     )
     .limit(1);
 
-  if (existing[0]) {
-    return existing[0];
+  if (current) {
+    return current;
   }
 
-  const inserted = await db
+  /* ---------- 2. No current period — create one ---------- */
+
+  const [inserted] = await db
     .insert(subscriptionUsage)
     .values({
       subscriptionId,
       userId,
-      periodStart,
-      periodEnd,
+      periodStart: subscriptionStartsAt,
+      periodEnd: subscriptionEndsAt,
       auditsUsed: 0,
       pagesCrawled: 0,
       aiRecommendationsUsed: 0,
@@ -211,23 +262,25 @@ async function ensureUsagePeriod(
     })
     .returning();
 
-  if (inserted[0]) {
-    return inserted[0];
+  if (inserted) {
+    return inserted;
   }
 
-  const retry = await db
+  /* ---------- 3. Lost the race — re-fetch ---------- */
+
+  const [retry] = await db
     .select()
     .from(subscriptionUsage)
     .where(
       and(
         eq(subscriptionUsage.subscriptionId, subscriptionId),
-        eq(subscriptionUsage.periodStart, periodStart),
-        eq(subscriptionUsage.periodEnd, periodEnd)
+        lte(subscriptionUsage.periodStart, now),
+        gt(subscriptionUsage.periodEnd, now)
       )
     )
     .limit(1);
 
-  return retry[0] ?? null;
+  return retry ?? null;
 }
 
 async function getActiveProjectCount(userId: string): Promise<number> {
@@ -482,7 +535,10 @@ export async function reserveAuditAndProject(
         .where(
           and(
             eq(subscriptions.userId, userId),
-            eq(subscriptions.status, "active"),
+            inArray(
+              subscriptions.status,
+              ACTIVE_SUBSCRIPTION_STATUSES
+            ),
             lte(subscriptions.endsAt, now)
           )
         );
@@ -498,7 +554,10 @@ export async function reserveAuditAndProject(
         .where(
           and(
             eq(subscriptions.userId, userId),
-            eq(subscriptions.status, "active"),
+            inArray(
+              subscriptions.status,
+              ACTIVE_SUBSCRIPTION_STATUSES
+            ),
             lte(subscriptions.startsAt, now),
             gt(subscriptions.endsAt, now)
           )
@@ -524,16 +583,19 @@ export async function reserveAuditAndProject(
 
       const plan = active.plan;
 
-      /* 4. Ensure subscription usage row exists */
+      /* 4. Ensure subscription usage row exists (contains-now lookup) */
       let usage = (
         await tx
           .select()
           .from(subscriptionUsage)
           .where(
             and(
-              eq(subscriptionUsage.subscriptionId, active.subscription.id),
-              eq(subscriptionUsage.periodStart, active.subscription.startsAt),
-              eq(subscriptionUsage.periodEnd, active.subscription.endsAt)
+              eq(
+                subscriptionUsage.subscriptionId,
+                active.subscription.id
+              ),
+              lte(subscriptionUsage.periodStart, now),
+              gt(subscriptionUsage.periodEnd, now)
             )
           )
           .limit(1)
@@ -572,14 +634,8 @@ export async function reserveAuditAndProject(
                     subscriptionUsage.subscriptionId,
                     active.subscription.id
                   ),
-                  eq(
-                    subscriptionUsage.periodStart,
-                    active.subscription.startsAt
-                  ),
-                  eq(
-                    subscriptionUsage.periodEnd,
-                    active.subscription.endsAt
-                  )
+                  lte(subscriptionUsage.periodStart, now),
+                  gt(subscriptionUsage.periodEnd, now)
                 )
               )
               .limit(1)
@@ -811,7 +867,10 @@ export async function refundAuditReservation(
         .where(
           and(
             eq(subscriptions.userId, userId),
-            eq(subscriptions.status, "active"),
+            inArray(
+              subscriptions.status,
+              ACTIVE_SUBSCRIPTION_STATUSES
+            ),
             lte(subscriptions.startsAt, now),
             gt(subscriptions.endsAt, now)
           )
@@ -828,9 +887,12 @@ export async function refundAuditReservation(
         .from(subscriptionUsage)
         .where(
           and(
-            eq(subscriptionUsage.subscriptionId, active.subscription.id),
-            eq(subscriptionUsage.periodStart, active.subscription.startsAt),
-            eq(subscriptionUsage.periodEnd, active.subscription.endsAt)
+            eq(
+              subscriptionUsage.subscriptionId,
+              active.subscription.id
+            ),
+            lte(subscriptionUsage.periodStart, now),
+            gt(subscriptionUsage.periodEnd, now)
           )
         )
         .limit(1)
@@ -1090,6 +1152,78 @@ export async function consumeAIRecommendation(
     limit,
     remaining: Math.max(0, limit - used),
   };
+}
+
+/* =========================================================
+   REFUND AI RECOMMENDATION
+========================================================= */
+
+/**
+ * Refund a previously consumed AI recommendation.
+ *
+ * Used when a reservation succeeded but the downstream Gemini
+ * call failed, so the user isn't charged for a request that
+ * never produced anything.
+ *
+ * The GREATEST(...) guard prevents the counter from going
+ * negative if this is called more than once by mistake.
+ */
+export async function refundAIRecommendation(
+  userId: string
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const now = new Date();
+
+    const active = (
+      await tx
+        .select({
+          subscription: subscriptions,
+        })
+        .from(subscriptions)
+        .where(
+          and(
+            eq(subscriptions.userId, userId),
+            inArray(
+              subscriptions.status,
+              ACTIVE_SUBSCRIPTION_STATUSES
+            ),
+            lte(subscriptions.startsAt, now),
+            gt(subscriptions.endsAt, now)
+          )
+        )
+        .orderBy(sql`${subscriptions.endsAt} DESC`)
+        .limit(1)
+    )[0];
+
+    if (!active) return;
+
+    const usage = (
+      await tx
+        .select()
+        .from(subscriptionUsage)
+        .where(
+          and(
+            eq(
+              subscriptionUsage.subscriptionId,
+              active.subscription.id
+            ),
+            lte(subscriptionUsage.periodStart, now),
+            gt(subscriptionUsage.periodEnd, now)
+          )
+        )
+        .limit(1)
+    )[0];
+
+    if (!usage) return;
+
+    await tx
+      .update(subscriptionUsage)
+      .set({
+        aiRecommendationsUsed: sql`GREATEST(${subscriptionUsage.aiRecommendationsUsed} - 1, 0)`,
+        updatedAt: now,
+      })
+      .where(eq(subscriptionUsage.id, usage.id));
+  });
 }
 
 /* =========================================================

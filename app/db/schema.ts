@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   uuid,
@@ -765,6 +766,10 @@ export const subscriptionUsage = pgTable(
       withTimezone: true,
     }).notNull(),
 
+    renewalReference: varchar("renewal_reference", {
+      length: 255,
+    }),
+
     auditsUsed: integer("audits_used").notNull().default(0),
 
     pagesCrawled: integer("pages_crawled").notNull().default(0),
@@ -799,5 +804,9 @@ export const subscriptionUsage = pgTable(
       table.periodStart,
       table.periodEnd
     ),
+
+    uniqueIndex("subscription_usage_renewal_reference_idx")
+      .on(table.renewalReference)
+      .where(sql`${table.renewalReference} IS NOT NULL`),
   ]
 );
