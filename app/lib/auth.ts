@@ -6,6 +6,7 @@ import {
   timingSafeEqual,
 } from "crypto";
 import { and, eq } from "drizzle-orm";
+// import { createHash, randomBytes } from "crypto";
 
 import { db } from "@/app/db";
 import {
@@ -155,7 +156,14 @@ export async function getCurrentUser() {
         email: users.email,
         role: users.role,
         emailVerifiedAt:
-          users.emailVerifiedAt,
+        users.emailVerifiedAt,
+
+         // 2FA
+        twoFactorEnabledAt: users.twoFactorEnabledAt,
+        twoFactorSecret: users.twoFactorSecret,
+        twoFactorEmailCodeHash: users.twoFactorEmailCodeHash,
+        twoFactorEmailCodeExpiresAt: users.twoFactorEmailCodeExpiresAt,
+        
       },
       session: {
         expiresAt: sessions.expiresAt,
@@ -211,6 +219,33 @@ export async function getCurrentUser() {
 
   return currentSession.user;
 }
+
+
+const CHALLENGE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+// In-memory store — fine for a single server. Move to Redis/DB
+// if you deploy multiple instances.
+const challenges = new Map<string, { userId: string; expiresAt: number }>();
+
+export function createTwoFactorChallenge(userId: string): string {
+  const token = randomBytes(32).toString("hex");
+  challenges.set(token, {
+    userId,
+    expiresAt: Date.now() + CHALLENGE_TTL_MS,
+  });
+  return token;
+}
+
+    export function consumeTwoFactorChallenge(token: string): string | null {
+      const entry = challenges.get(token);
+      if (!entry) return null;
+
+      challenges.delete(token);
+
+      if (entry.expiresAt < Date.now()) return null;
+
+      return entry.userId;
+    }
 
 /**
  * Destroy the current authenticated session.

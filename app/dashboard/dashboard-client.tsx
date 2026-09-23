@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
 import AuditForm, {
   type AuditErrorCode,
@@ -14,6 +15,7 @@ type User = {
   id: string;
   name?: string | null;
   email: string;
+  twoFactorEnabledAt: string | Date | null;
 };
 
 type SubscriptionState = {
@@ -299,6 +301,11 @@ export default function DashboardClient({
 
   return (
     <div className="flex flex-col gap-6">
+      {/* =====================================================
+          2FA NUDGE BANNER
+      ====================================================== */}
+      {!user.twoFactorEnabledAt && <TwoFactorBanner />}
+
       {/* =====================================================
           FORM / UPGRADE GATE (no result yet)
       ====================================================== */}
@@ -810,6 +817,128 @@ export default function DashboardClient({
 /* =========================================================
    SUB-COMPONENTS
 ========================================================= */
+
+function TwoFactorBanner() {
+  const [dismissed, setDismissed] = useState(false);
+  const [checked, setChecked] = useState(false);
+
+  /*
+   * Remember dismissal for the session only. We deliberately
+   * use sessionStorage, not localStorage, so the banner
+   * reappears on the next visit — 2FA is a security nudge,
+   * not a one-time notification.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      setChecked(true);
+      return;
+    }
+
+    if (sessionStorage.getItem("hide-2fa-banner") === "1") {
+      setDismissed(true);
+    }
+
+    setChecked(true);
+  }, []);
+
+  function handleDismiss() {
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("hide-2fa-banner", "1");
+    }
+    setDismissed(true);
+  }
+
+  /*
+   * Avoid a flash of the banner on first paint before
+   * sessionStorage has been read. `checked` flips to true
+   * after the effect runs.
+   */
+  if (!checked || dismissed) return null;
+
+  return (
+    <div
+      className="flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
+      style={{
+        borderColor: "var(--border)",
+        background: "var(--primary-light)",
+      }}
+      role="region"
+      aria-label="Two-factor authentication recommendation"
+    >
+      <div className="flex items-start gap-3">
+        <span
+          className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+          style={{
+            background: "var(--surface)",
+            color: "var(--primary)",
+          }}
+          aria-hidden="true"
+        >
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            <path d="M9 12l2 2 4-4" />
+          </svg>
+        </span>
+
+        <div>
+          <div
+            className="text-sm font-semibold"
+            style={{ color: "var(--text-primary)" }}
+          >
+            Protect your account with two-factor authentication
+          </div>
+          <p
+            className="mt-0.5 text-xs leading-relaxed"
+            style={{ color: "var(--text-muted)" }}
+          >
+            Add an extra layer of security. It takes less than a
+            minute — use an authenticator app or your email.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-2">
+        <Link
+          href="/dashboard/settings"
+          className="btn-stripe btn-stripe-primary"
+        >
+          Enable 2FA
+        </Link>
+
+        <button
+          type="button"
+          onClick={handleDismiss}
+          aria-label="Dismiss"
+          className="rounded-lg p-2 transition"
+          style={{ color: "var(--text-muted)" }}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function StatCard({
   title,

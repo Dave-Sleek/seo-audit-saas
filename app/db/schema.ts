@@ -41,6 +41,22 @@ export const users = pgTable(
       .notNull()
       .default("user"),
 
+
+       // ---------- 2FA ----------
+    twoFactorSecret: text("two_factor_secret"),        // encrypted TOTP secret
+    twoFactorEnabledAt: timestamp("two_factor_enabled_at", {
+      withTimezone: true,
+    }),
+    // -------------------------------------------------
+
+    // ----------- Email factor auth--------------------
+    // inside the users table definition
+      twoFactorMethod: varchar("two_factor_method", { length: 20 }),
+      twoFactorEmailCodeHash: text("two_factor_email_code_hash"),
+      twoFactorEmailCodeExpiresAt: timestamp("two_factor_email_code_expires_at", {
+        withTimezone: true,
+      }),
+
     emailVerifiedAt: timestamp("email_verified_at", {
       withTimezone: true,
     }),
@@ -58,6 +74,29 @@ export const users = pgTable(
       .notNull(),
   },
   (table) => [index("users_role_idx").on(table.role)]
+);
+  
+ 
+
+
+  /**
+ * Recovery codes for 2FA.
+ *
+ * Codes are hashed (SHA-256) — the raw code is only shown
+ * to the user once, at generation time.
+ */
+export const twoFactorRecoveryCodes = pgTable(
+  "two_factor_recovery_codes",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    codeHash: text("code_hash").notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("two_factor_recovery_codes_user_id_idx").on(table.userId)]
 );
 
 /**
