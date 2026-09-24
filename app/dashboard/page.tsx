@@ -11,6 +11,8 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
+  
+
   const usage = await getUsageSummary(user.id);
 
   const hasSubscription = Boolean(usage.subscription && usage.plan);
@@ -25,6 +27,9 @@ export default async function DashboardPage() {
         id: user.id,
         name: user.name ?? null,
         email: user.email,
+         twoFactorEnabledAt: user.twoFactorEnabledAt
+          ? user.twoFactorEnabledAt.toISOString()
+          : null
       }}
       subscription={{
         hasSubscription,

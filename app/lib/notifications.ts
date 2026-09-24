@@ -3,6 +3,8 @@ import { and, desc, eq, isNull, lt, sql } from "drizzle-orm";
 import { db } from "@/app/db";
 import { notifications } from "@/app/db/schema";
 
+// app/lib/notifications.ts
+
 export type NotificationType =
   | "audit.completed"
   | "audit.failed"
@@ -10,6 +12,8 @@ export type NotificationType =
   | "payment.succeeded"
   | "payment.failed"
   | "subscription.renewed"
+  | "subscription.renewal_disabled"
+  | "subscription.cancelled"
   | "subscription.expiring"
   | "subscription.expired"
   | "security.2fa_enabled"
