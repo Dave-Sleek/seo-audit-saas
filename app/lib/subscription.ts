@@ -1,5 +1,6 @@
 import {
   and,
+  asc,
   desc,
   eq,
   gt,
@@ -18,15 +19,15 @@ import {
 } from "@/app/db/schema";
 
 /* =========================================================
+   TYPES
+========================================================= */
+
+type Subscription = typeof subscriptions.$inferSelect;
+
+/* =========================================================
    CONSTANTS
 ========================================================= */
 
-/**
- * Subscription statuses considered currently active.
- *
- * "non_renewing" means the user has cancelled auto-renewal
- * but still has access until endsAt.
- */
 export const ACTIVE_SUBSCRIPTION_STATUSES = [
   "active",
   "non_renewing",
@@ -36,12 +37,6 @@ export const ACTIVE_SUBSCRIPTION_STATUSES = [
    INTERNAL HELPERS
 ========================================================= */
 
-/**
- * Load the currently active subscription + plan for a user.
- *
- * Before querying, marks any past-due subscriptions as
- * expired so they don't appear in the active set.
- */
 async function getActiveSubscriptionWithPlan(userId: string) {
   const now = new Date();
 
@@ -83,21 +78,6 @@ async function getActiveSubscriptionWithPlan(userId: string) {
   return result[0] ?? null;
 }
 
-/**
- * Find or create the subscription_usage row for the
- * *current* billing period.
- *
- * We deliberately do NOT match on
- * (subscriptionId, subscription.startsAt, subscription.endsAt)
- * because renewals extend the subscription's endsAt without
- * touching startsAt. That means the exact-match approach
- * stops finding the row after the first renewal.
- *
- * Instead, we find the usage row whose period *contains now*.
- *
- * If no such row exists (first call for a new subscription),
- * we create one using the subscription's initial period.
- */
 async function ensureUsagePeriod(
   userId: string,
   subscriptionId: string,
@@ -105,8 +85,6 @@ async function ensureUsagePeriod(
   subscriptionEndsAt: Date
 ): Promise<typeof subscriptionUsage.$inferSelect | null> {
   const now = new Date();
-
-  /* ---------- 1. Find the usage row for the current period ---------- */
 
   const [current] = await db
     .select()
@@ -123,8 +101,6 @@ async function ensureUsagePeriod(
   if (current) {
     return current;
   }
-
-  /* ---------- 2. No current period — create one ---------- */
 
   const [inserted] = await db
     .insert(subscriptionUsage)
@@ -150,8 +126,6 @@ async function ensureUsagePeriod(
     return inserted;
   }
 
-  /* ---------- 3. Lost the race — re-fetch ---------- */
-
   const [retry] = await db
     .select()
     .from(subscriptionUsage)
@@ -167,9 +141,6 @@ async function ensureUsagePeriod(
   return retry ?? null;
 }
 
-/**
- * Count active projects for a user.
- */
 async function getActiveProjectCount(
   userId: string
 ): Promise<number> {
@@ -188,14 +159,6 @@ async function getActiveProjectCount(
   return Number(result[0]?.count ?? 0);
 }
 
-/**
- * Insert a usage period inside an existing transaction.
- *
- * Used only by activateSubscription, which needs the insert
- * to happen atomically with the subscription creation.
- *
- * Non-transaction callers should use ensureUsagePeriod instead.
- */
 async function createUsagePeriod(
   tx: Parameters<
     Parameters<typeof db.transaction>[0]
@@ -222,16 +185,6 @@ async function createUsagePeriod(
     });
 }
 
-/**
- * Read the plan ID from a payment's metadata.
- *
- * The payments table has no plan_id column — the plan ID is
- * stored inside metadata.planId when the payment row is
- * created by /api/payments/initialize.
- *
- * Throws if missing. After this call TypeScript knows the
- * returned value is a non-null string.
- */
 function extractPlanIdFromPayment(
   payment: typeof payments.$inferSelect
 ): string {
@@ -255,9 +208,6 @@ function extractPlanIdFromPayment(
    PUBLIC — READS
 ========================================================= */
 
-/**
- * Get a plan by ID.
- */
 export async function getPlanById(planId: string) {
   const [plan] = await db
     .select()
@@ -268,13 +218,11 @@ export async function getPlanById(planId: string) {
   return plan ?? null;
 }
 
-/**
- * Get the user's active subscription + plan, or null.
- */
 export async function getActiveSubscription(userId: string) {
+  await maybeExtendFreeSubscription(userId);
+
   const now = new Date();
 
-  // First expire anything that's already ended.
   await expireUserSubscriptions(userId);
 
   const [subscription] = await db
@@ -297,32 +245,19 @@ export async function getActiveSubscription(userId: string) {
     .orderBy(desc(subscriptions.endsAt))
     .limit(1);
 
-  if (!subscription) {
-    return null;
-  }
-
-  return subscription;
+  return subscription ?? null;
 }
 
-/**
- * Get just the subscription row (no joined plan).
- */
 export async function getUserSubscription(userId: string) {
   const result = await getActiveSubscription(userId);
   return result?.subscription ?? null;
 }
 
-/**
- * Get the user's current plan, or null if not subscribed.
- */
 export async function getCurrentPlan(userId: string) {
   const activeSubscription = await getActiveSubscription(userId);
   return activeSubscription?.plan ?? null;
 }
 
-/**
- * Whether the user has any active subscription.
- */
 export async function hasActiveSubscription(
   userId: string
 ): Promise<boolean> {
@@ -334,9 +269,6 @@ export async function hasActiveSubscription(
    PUBLIC — EXPIRY
 ========================================================= */
 
-/**
- * Expire all past-due subscriptions for a single user.
- */
 export async function expireUserSubscriptions(
   userId: string
 ): Promise<void> {
@@ -358,15 +290,27 @@ export async function expireUserSubscriptions(
         lte(subscriptions.endsAt, now)
       )
     );
+
+  const [stillActive] = await db
+    .select({ id: subscriptions.id })
+    .from(subscriptions)
+    .where(
+      and(
+        eq(subscriptions.userId, userId),
+        inArray(
+          subscriptions.status,
+          ACTIVE_SUBSCRIPTION_STATUSES
+        ),
+        gt(subscriptions.endsAt, now)
+      )
+    )
+    .limit(1);
+
+  if (!stillActive) {
+    await grantFreeSubscription(userId);
+  }
 }
 
-/**
- * Expire all past-due subscriptions across all users.
- *
- * Intended to be called by a daily cron job. The
- * per-user version above covers the common case where the
- * user just loaded a page; this one sweeps the rest.
- */
 export async function expireExpiredSubscriptions(): Promise<void> {
   const now = new Date();
 
@@ -388,12 +332,177 @@ export async function expireExpiredSubscriptions(): Promise<void> {
 }
 
 /* =========================================================
+   PUBLIC — FREE PLAN
+========================================================= */
+
+export async function getFreePlan() {
+  const [plan] = await db
+    .select()
+    .from(plans)
+    .where(
+      and(
+        eq(plans.price, 0),
+        eq(plans.isActive, true)
+      )
+    )
+    .orderBy(asc(plans.createdAt))
+    .limit(1);
+
+  return plan ?? null;
+}
+
+export async function grantFreeSubscription(
+  userId: string
+): Promise<void> {
+  const freePlan = await getFreePlan();
+
+  if (!freePlan) {
+    console.warn(
+      "[subscription] no Free plan configured; skipping auto-grant",
+      { userId }
+    );
+    return;
+  }
+
+  const now = new Date();
+
+  await db.transaction(async (tx) => {
+    const existing = await tx
+      .select({ id: subscriptions.id })
+      .from(subscriptions)
+      .where(
+        and(
+          eq(subscriptions.userId, userId),
+          inArray(
+            subscriptions.status,
+            ACTIVE_SUBSCRIPTION_STATUSES
+          ),
+          gt(subscriptions.endsAt, now)
+        )
+      )
+      .for("update");
+
+    if (existing.length > 0) {
+      return;
+    }
+
+    const startsAt = now;
+    const endsAt = calculateEndDate(
+      startsAt,
+      freePlan.interval
+    );
+
+    const [newSub] = await tx
+      .insert(subscriptions)
+      .values({
+        userId,
+        planId: freePlan.id,
+        status: "active",
+        startsAt,
+        endsAt,
+      })
+      .returning();
+
+    if (!newSub) {
+      throw new Error("FREE_SUBSCRIPTION_CREATION_FAILED");
+    }
+
+    await createUsagePeriod(
+      tx,
+      newSub.id,
+      userId,
+      startsAt,
+      endsAt
+    );
+
+    console.log("[subscription] granted Free plan", {
+      userId,
+      subscriptionId: newSub.id,
+      planId: freePlan.id,
+      endsAt: endsAt.toISOString(),
+    });
+  });
+}
+
+async function maybeExtendFreeSubscription(
+  userId: string
+): Promise<void> {
+  const now = new Date();
+
+  const [row] = await db
+    .select({
+      subscription: subscriptions,
+      plan: plans,
+    })
+    .from(subscriptions)
+    .innerJoin(plans, eq(subscriptions.planId, plans.id))
+    .where(
+      and(
+        eq(subscriptions.userId, userId),
+        inArray(
+          subscriptions.status,
+          ACTIVE_SUBSCRIPTION_STATUSES
+        ),
+        eq(plans.price, 0)
+      )
+    )
+    .orderBy(desc(subscriptions.endsAt))
+    .limit(1);
+
+  if (!row) return;
+
+  const { subscription, plan } = row;
+
+  if (subscription.endsAt > now) return;
+
+  const periodStart = subscription.endsAt;
+  const periodEnd = calculateEndDate(
+    periodStart,
+    plan.interval
+  );
+
+  await db.transaction(async (tx) => {
+    const [locked] = await tx
+      .select()
+      .from(subscriptions)
+      .where(eq(subscriptions.id, subscription.id))
+      .for("update");
+
+    if (!locked) return;
+
+    if (locked.endsAt > now) return;
+
+    await tx
+      .update(subscriptions)
+      .set({
+        status: "active",
+        endsAt: periodEnd,
+        cancelledAt: null,
+        updatedAt: now,
+      })
+      .where(eq(subscriptions.id, subscription.id));
+
+    await createUsagePeriod(
+      tx,
+      subscription.id,
+      userId,
+      periodStart,
+      periodEnd
+    );
+  });
+
+  console.log("[subscription] extended Free plan", {
+    userId,
+    subscriptionId: subscription.id,
+    newPeriodStart: periodStart.toISOString(),
+    newPeriodEnd: periodEnd.toISOString(),
+  });
+}
+
+/* =========================================================
    PUBLIC — DATES
 ========================================================= */
 
-/**
- * Add one interval to a start date.
- */
 export function calculateEndDate(
   startDate: Date,
   interval: string
@@ -439,18 +548,6 @@ export function calculateEndDate(
    PUBLIC — ACTIVATION
 ========================================================= */
 
-/**
- * Activate a subscription from a successful payment.
- *
- * Idempotent and concurrency-safe.
- *
- * The payment row is locked with SELECT ... FOR UPDATE so
- * the callback and the webhook cannot both create a
- * subscription for the same payment.
- *
- * If the user already has an active subscription, the new
- * one stacks on top of it (start date = existing endsAt).
- */
 export async function activateSubscription({
   paymentId,
   userId,
@@ -554,7 +651,14 @@ export async function activateSubscription({
 
     /* ---------- 8. Find existing active subscription ---------- */
 
-    const [existingActiveSubscription] = await tx
+    /*
+     * Fetch as an array first, then destructure into an
+     * explicitly-typed `let`. This lets us reassign it to
+     * `undefined` below (after expiring a Free plan) without
+     * TypeScript complaining that `undefined` isn't
+     * assignable to the subscription type.
+     */
+    const existingActiveSubscriptions = await tx
       .select()
       .from(subscriptions)
       .where(
@@ -570,7 +674,106 @@ export async function activateSubscription({
       .orderBy(desc(subscriptions.endsAt))
       .limit(1);
 
-    /* ---------- 9. Determine start / end dates ---------- */
+    let existingActiveSubscription: Subscription | undefined =
+      existingActiveSubscriptions[0];
+
+    /* ---------- 8a. Free plan upgrade — replace, don't stack ---------- */
+
+    if (existingActiveSubscription) {
+      const [existingPlan] = await tx
+        .select()
+        .from(plans)
+        .where(eq(plans.id, existingActiveSubscription.planId))
+        .limit(1);
+
+      if (existingPlan && Number(existingPlan.price) === 0) {
+        const expiredSubscriptionId = existingActiveSubscription.id;
+
+        await tx
+          .update(subscriptions)
+          .set({
+            status: "expired",
+            updatedAt: now,
+          })
+          .where(eq(subscriptions.id, expiredSubscriptionId));
+
+        console.log(
+          "[subscription] expired Free plan to make room for paid upgrade",
+          {
+            userId,
+            expiredSubscriptionId,
+            newPlanId: plan.id,
+          }
+        );
+
+        existingActiveSubscription = undefined;
+      }
+    }
+
+    /* ---------- 8b. Same plan still active — extend ---------- */
+
+    if (
+      existingActiveSubscription &&
+      existingActiveSubscription.planId === plan.id
+    ) {
+      const extensionStart = new Date(
+        existingActiveSubscription.endsAt
+      );
+
+      const extensionEnd = calculateEndDate(
+        extensionStart,
+        plan.interval
+      );
+
+      await tx
+        .update(subscriptions)
+        .set({
+          endsAt: extensionEnd,
+          updatedAt: now,
+        })
+        .where(
+          eq(subscriptions.id, existingActiveSubscription.id)
+        );
+
+      await createUsagePeriod(
+        tx,
+        existingActiveSubscription.id,
+        userId,
+        extensionStart,
+        extensionEnd
+      );
+
+      const [linkedPayment] = await tx
+        .update(payments)
+        .set({
+          subscriptionId: existingActiveSubscription.id,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(payments.id, payment.id),
+            eq(payments.userId, userId),
+            sql`${payments.subscriptionId} IS NULL`
+          )
+        )
+        .returning();
+
+      if (!linkedPayment) {
+        throw new Error("PAYMENT_ALREADY_LINKED");
+      }
+
+      console.log("[subscription] extended same plan", {
+        subscriptionId: existingActiveSubscription.id,
+        userId,
+        planId: plan.id,
+        planName: plan.name,
+        newEndsAt: extensionEnd.toISOString(),
+      });
+
+      return existingActiveSubscription;
+    }
+
+    /* ---------- 9. Different plan (or no subscription) — stack ---------- */
 
     const startsAt = existingActiveSubscription
       ? new Date(existingActiveSubscription.endsAt)
@@ -634,31 +837,6 @@ export async function activateSubscription({
    PUBLIC — RENEWAL
 ========================================================= */
 
-/**
- * Extend a subscription from a renewal charge.
- *
- * Called by the webhook after Paystack confirms a renewal.
- * The subscription already exists — we just push endsAt
- * forward by one interval and create a fresh usage period.
- *
- * Idempotency
- * -----------
- * If a usage row already exists for the computed period, we
- * assume this renewal has already been applied and return
- * early. That makes the function safe to call multiple times
- * for the same renewal (Paystack retries webhooks).
- *
- * Period boundary
- * ---------------
- * The new period's periodStart is offset by 1 millisecond
- * from the previous period's periodEnd. JavaScript Date has
- * millisecond precision, so this is the smallest offset that
- * reliably prevents the two periods from overlapping at the
- * boundary in the "period contains now" query.
- *
- * If the subscription already expired, the new period starts
- * from now instead of the previous endsAt.
- */
 export async function extendSubscriptionFromRenewal({
   subscriptionId,
   planInterval,
@@ -685,14 +863,6 @@ export async function extendSubscriptionFromRenewal({
 
     /* ---------- 2. Idempotency check by renewal reference ---------- */
 
-    /*
-     * If a usage row already carries this renewal reference,
-     * the renewal has been applied. Return early.
-     *
-     * This is the guard that makes repeat webhooks safe.
-     * The previous version compared period boundaries, but
-     * those shift on every call, so it never matched.
-     */
     const [existingRenewal] = await tx
       .select({ id: subscriptionUsage.id })
       .from(subscriptionUsage)
@@ -705,7 +875,60 @@ export async function extendSubscriptionFromRenewal({
       return;
     }
 
-    /* ---------- 3. Compute new period boundaries ---------- */
+    /* ---------- 3. Resolve pending plan change (if any) ---------- */
+
+    let effectiveInterval = planInterval;
+
+    if (subscription.pendingPlanId) {
+      const [newPlan] = await tx
+        .select()
+        .from(plans)
+        .where(eq(plans.id, subscription.pendingPlanId))
+        .limit(1);
+
+      if (newPlan && newPlan.isActive) {
+        await tx
+          .update(subscriptions)
+          .set({
+            planId: newPlan.id,
+            pendingPlanId: null,
+            pendingChangeAt: null,
+            updatedAt: new Date(),
+          })
+          .where(eq(subscriptions.id, subscriptionId));
+
+        effectiveInterval = newPlan.interval;
+
+        console.log(
+          "[subscription] pending plan change applied",
+          {
+            subscriptionId,
+            newPlanId: newPlan.id,
+            newPlanName: newPlan.name,
+            newInterval: newPlan.interval,
+          }
+        );
+      } else {
+        console.error(
+          "[subscription] pending plan is missing or inactive; clearing",
+          {
+            subscriptionId,
+            pendingPlanId: subscription.pendingPlanId,
+          }
+        );
+
+        await tx
+          .update(subscriptions)
+          .set({
+            pendingPlanId: null,
+            pendingChangeAt: null,
+            updatedAt: new Date(),
+          })
+          .where(eq(subscriptions.id, subscriptionId));
+      }
+    }
+
+    /* ---------- 4. Compute new period boundaries ---------- */
 
     const now = new Date();
 
@@ -716,9 +939,12 @@ export async function extendSubscriptionFromRenewal({
       rawPeriodStart.getTime() + 1
     );
 
-    const periodEnd = calculateEndDate(periodStart, planInterval);
+    const periodEnd = calculateEndDate(
+      periodStart,
+      effectiveInterval
+    );
 
-    /* ---------- 4. Extend the subscription ---------- */
+    /* ---------- 5. Extend the subscription ---------- */
 
     await tx
       .update(subscriptions)
@@ -730,7 +956,7 @@ export async function extendSubscriptionFromRenewal({
       })
       .where(eq(subscriptions.id, subscriptionId));
 
-    /* ---------- 5. Create the new usage period ---------- */
+    /* ---------- 6. Create the new usage period ---------- */
 
     await tx
       .insert(subscriptionUsage)
@@ -745,17 +971,16 @@ export async function extendSubscriptionFromRenewal({
         renewalReference,
       })
       .onConflictDoNothing({
-        target: [
-          subscriptionUsage.renewalReference,
-        ],
+        target: [subscriptionUsage.renewalReference],
       });
 
-    /* ---------- 6. Audit trail ---------- */
+    /* ---------- 7. Audit trail ---------- */
 
     console.log("[subscription] renewed", {
       subscriptionId,
       userId: subscription.userId,
       renewalReference,
+      effectiveInterval,
       newPeriodStart: periodStart.toISOString(),
       newPeriodEnd: periodEnd.toISOString(),
     });
@@ -766,17 +991,6 @@ export async function extendSubscriptionFromRenewal({
    PUBLIC — CANCELLATION
 ========================================================= */
 
-/**
- * Mark the user's subscription as non-renewing.
- *
- * The user keeps access until endsAt. When that date passes,
- * expireUserSubscriptions (or the cron) will flip the status
- * to "expired".
- *
- * This does NOT cancel the Paystack recurring profile — that
- * requires calling Paystack's subscription disable endpoint
- * with the stored paystack_subscription_code.
- */
 export async function cancelSubscription(userId: string) {
   const [subscription] = await db
     .select()

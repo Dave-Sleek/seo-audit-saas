@@ -628,6 +628,11 @@ export const subscriptions = pgTable(
         onDelete: "restrict",
       }),
 
+      pendingPlanId: uuid("pending_plan_id").references(() => plans.id, {
+        onDelete: "set null",
+      }),
+      pendingChangeAt: timestamp("pending_change_at", { withTimezone: true }),
+
     status: varchar("status", {
       length: 50,
     })
@@ -847,5 +852,42 @@ export const subscriptionUsage = pgTable(
     uniqueIndex("subscription_usage_renewal_reference_idx")
       .on(table.renewalReference)
       .where(sql`${table.renewalReference} IS NOT NULL`),
+  ]
+);
+
+// Notification
+
+// app/db/schema.ts
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+
+    type: varchar("type", { length: 60 }).notNull(),
+    title: varchar("title", { length: 200 }).notNull(),
+    body: text("body"),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    actionUrl: varchar("action_url", { length: 500 }),
+
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("notifications_user_id_created_at_idx").on(
+      table.userId,
+      table.createdAt
+    ),
+    index("notifications_user_id_read_at_idx")
+      .on(table.userId, table.readAt)
+      .where(sql`${table.readAt} IS NULL`),
   ]
 );

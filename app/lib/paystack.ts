@@ -433,6 +433,65 @@ export async function verifyTransaction(
         );
       }
 
+
+
+    /**
+        * =====================================================
+        *PAYSTACK CANCEL SUBSCRIPTION
+        * =====================================================
+    */ 
+
+      export async function disablePaystackSubscription({
+        subscriptionCode,
+        emailToken,
+      }: {
+        subscriptionCode: string;
+        emailToken: string;
+      }): Promise<{ success: boolean; error?: string }> {
+        const secret = process.env.PAYSTACK_SECRET_KEY;
+
+        if (!secret) {
+          return { success: false, error: "PAYSTACK_NOT_CONFIGURED" };
+        }
+
+        try {
+          const res = await fetch(
+            "https://api.paystack.co/subscription/disable",
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${secret}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                code: subscriptionCode,
+                token: emailToken,
+              }),
+            }
+          );
+
+          const data = await res.json();
+
+          if (!res.ok || !data.status) {
+            console.error("[paystack] disable subscription failed", {
+              subscriptionCode,
+              status: res.status,
+              message: data?.message,
+            });
+
+            return {
+              success: false,
+              error: data?.message ?? "PAYSTACK_DISABLE_FAILED",
+            };
+          }
+
+          return { success: true };
+        } catch (err) {
+          console.error("[paystack] disable subscription threw", err);
+          return { success: false, error: "NETWORK_ERROR" };
+        }
+      }
+
 /**
  * ============================================================
  * WEBHOOK SIGNATURE VERIFICATION

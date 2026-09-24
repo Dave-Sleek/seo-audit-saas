@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 
+import { grantFreeSubscription } from "@/app/lib/subscription";
 import { sendWelcomeEmail } from "@/app/lib/email/send";
 
 import { db } from "@/app/db";
@@ -89,11 +90,32 @@ export async function POST(request: Request) {
 
     await createSession(user.id);
 
+    /* ---------- Grant Free subscription ----------
+     *
+     * Every new account starts on the Free plan. This
+     * creates a subscription row + first usage period so
+     * the user's dashboard shows their quota immediately
+     * instead of "no subscription."
+     *
+     * Failures are logged but do not fail signup. If this
+     * throws, the lazy grant path in expireUserSubscriptions
+     * will retry on the user's next page load — they'll
+     * still end up on Free, just a few seconds later.
+     */
+    try {
+      await grantFreeSubscription(user.id);
+    } catch (freeError) {
+      console.error(
+        "[signup] failed to grant Free subscription:",
+        freeError
+      );
+    }
+
     /* ---------- Send welcome email (non-blocking) ----------
      *
-     * Fires AFTER the user and session are committed. Failures
-     * are logged but never propagate — a broken email provider
-     * must not fail a signup.
+     * Fires AFTER the user and session are committed.
+     * Failures are logged but never propagate — a broken
+     * email provider must not fail a signup.
      */
     try {
       await sendWelcomeEmail({

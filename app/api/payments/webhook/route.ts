@@ -3,6 +3,7 @@ import { desc, eq } from "drizzle-orm";
 
 import { db } from "@/app/db";
 import { payments, plans, subscriptions } from "@/app/db/schema";
+import { createNotification } from "@/app/lib/notifications";
 import {
   validatePaystackPayment,
   verifyPaystackWebhookSignature,
@@ -166,11 +167,6 @@ export async function POST(request: NextRequest) {
           break;
       }
     } catch (handlerError) {
-      /*
-       * If a specific handler throws, log it and return 500
-       * so Paystack retries the event.
-       */
-
       console.error(
         `Paystack webhook handler failed for "${event}":`,
         handlerError instanceof Error
@@ -204,13 +200,7 @@ export async function POST(request: NextRequest) {
 
 /* =========================================================
    HANDLER — charge.success
-   =========================================================
- *
- * Fires for BOTH the initial payment and every renewal.
- *
- * Initial payment:  we already have a payments row → activate
- * Renewal:          we don't have a payments row → extend
- * ========================================================= */
+   ========================================================= */
 
 async function handleChargeSuccess(data: PaystackChargeSuccessData) {
   const reference = data.reference?.trim();
@@ -227,7 +217,9 @@ async function handleChargeSuccess(data: PaystackChargeSuccessData) {
     .where(eq(payments.reference, reference))
     .limit(1);
 
-  /* ---------- Case A: initial payment (payment row exists) ---------- */
+  /* =========================================================
+     CASE A: initial payment (payment row exists)
+  ========================================================= */
 
   if (payment) {
     /* Idempotency: already processed */
@@ -277,22 +269,42 @@ async function handleChargeSuccess(data: PaystackChargeSuccessData) {
     }
 
     /* Activate the subscription */
-    await activateSubscription({
+    const activatedSubscription = await activateSubscription({
       paymentId: updatedPayment.id,
       userId: updatedPayment.userId,
+    });
+
+    /* Load the plan for the notification body */
+    const [plan] = await db
+      .select()
+      .from(plans)
+      .where(eq(plans.id, activatedSubscription.planId))
+      .limit(1);
+
+    /* ---------- Notify: payment succeeded ---------- */
+
+    await createNotification({
+      userId: updatedPayment.userId,
+      type: "payment.succeeded",
+      title: "Payment received",
+      body: plan
+        ? `Your ${plan.name} subscription is now active.`
+        : "Your subscription is now active.",
+      actionUrl: "/dashboard/subscription",
+      metadata: {
+        paymentId: updatedPayment.id,
+        subscriptionId: activatedSubscription.id,
+        amount: Number(updatedPayment.amount),
+        planName: plan?.name ?? null,
+      },
     });
 
     return;
   }
 
-  /* ---------- Case B: renewal (no local payment row) ---------- */
-
-  /*
-   * Paystack generates a NEW reference for each recurring charge.
-   *
-   * We match the renewal to the user's subscription by
-   * customer_code (sent in the charge.success payload).
-   */
+  /* =========================================================
+     CASE B: renewal (no local payment row)
+  ========================================================= */
 
   const customerCode = data.customer?.customer_code;
   const subscriptionCode = data.subscription?.subscription_code;
@@ -302,7 +314,6 @@ async function handleChargeSuccess(data: PaystackChargeSuccessData) {
       "charge.success renewal: no customer_code or subscription_code in payload",
       { reference, email: data.customer?.email }
     );
-    /* Acknowledge but don't process — nothing to match on. */
     return;
   }
 
@@ -367,55 +378,62 @@ async function handleChargeSuccess(data: PaystackChargeSuccessData) {
       "charge.success renewal: amount mismatch",
       { paidAmount, planPrice, reference }
     );
-    /* Don't extend — flag for manual review */
     return;
   }
 
-  /* Create a payments row for the renewal */
+  /* ---------- Create a payments row for the renewal ---------- */
 
-  await db.insert(payments).values({
-    userId: existingSubscription.userId,
-    subscriptionId: existingSubscription.id,
-    provider: "paystack",
-    reference: transaction.reference,
-    amount: String(transaction.amount),
-    currency: transaction.currency,
-    status: "successful",
-    paidAt: transaction.paid_at
-      ? new Date(transaction.paid_at)
-      : new Date(),
-    providerTransactionId:
-      transaction.id !== undefined ? String(transaction.id) : null,
-    metadata: {
-      planId: plan.id,
-      planSlug: plan.slug,
-      type: "renewal",
-    },
-  });
+  const [renewalPayment] = await db
+    .insert(payments)
+    .values({
+      userId: existingSubscription.userId,
+      subscriptionId: existingSubscription.id,
+      provider: "paystack",
+      reference: transaction.reference,
+      amount: String(transaction.amount),
+      currency: transaction.currency,
+      status: "successful",
+      paidAt: transaction.paid_at
+        ? new Date(transaction.paid_at)
+        : new Date(),
+      providerTransactionId:
+        transaction.id !== undefined ? String(transaction.id) : null,
+      metadata: {
+        planId: plan.id,
+        planSlug: plan.slug,
+        type: "renewal",
+      },
+    })
+    .returning();
 
-  /* Extend the subscription */
+  /* ---------- Extend the subscription ---------- */
 
-    await extendSubscriptionFromRenewal({
+  await extendSubscriptionFromRenewal({
     subscriptionId: existingSubscription.id,
     planInterval: plan.interval,
     renewalReference: reference,
   });
 
-    //   await extendSubscriptionFromRenewal({
-    //     subscriptionId: existingSubscription.id,
-    //     planInterval: plan.interval,
-    //   });
+  /* ---------- Notify: subscription renewed ---------- */
+
+  await createNotification({
+    userId: existingSubscription.userId,
+    type: "subscription.renewed",
+    title: "Subscription renewed",
+    body: `Your ${plan.name} subscription has been renewed.`,
+    actionUrl: "/dashboard/subscription",
+    metadata: {
+      paymentId: renewalPayment?.id ?? null,
+      subscriptionId: existingSubscription.id,
+      amount: Number(transaction.amount),
+      planName: plan.name,
+    },
+  });
 }
 
 /* =========================================================
    HANDLER — subscription.create
-   =========================================================
- *
- * Paystack fires this after the FIRST successful charge of a
- * recurring subscription. We use it to store the Paystack
- * subscription code and email token — needed later to cancel
- * or query the subscription.
- * ========================================================= */
+   ========================================================= */
 
 async function handleSubscriptionCreate(data: PaystackSubscriptionData) {
   const subscriptionCode = data.subscription_code;
@@ -425,8 +443,6 @@ async function handleSubscriptionCreate(data: PaystackSubscriptionData) {
   if (!subscriptionCode) {
     throw new Error("subscription.create: missing subscription_code");
   }
-
-  /* Find the subscription by customer code (most reliable) */
 
   if (!customerCode) {
     console.error("subscription.create: missing customer_code");
@@ -466,11 +482,7 @@ async function handleSubscriptionCreate(data: PaystackSubscriptionData) {
 
 /* =========================================================
    HANDLER — subscription.not_renew
-   =========================================================
- *
- * User disabled auto-renewal from Paystack's portal.
- * The subscription remains active until endsAt, then expires.
- * ========================================================= */
+   ========================================================= */
 
 async function handleSubscriptionNotRenew(
   data: PaystackSubscriptionData
@@ -508,15 +520,25 @@ async function handleSubscriptionNotRenew(
       updatedAt: new Date(),
     })
     .where(eq(subscriptions.id, existing.id));
+
+  /* ---------- Notify: auto-renew disabled ---------- */
+
+  await createNotification({
+    userId: existing.userId,
+    type: "subscription.renewal_disabled",
+    title: "Auto-renewal disabled",
+    body: `Your subscription will end on ${existing.endsAt.toLocaleDateString()}. You can re-enable auto-renewal anytime.`,
+    actionUrl: "/dashboard/subscription",
+    metadata: {
+      subscriptionId: existing.id,
+      endsAt: existing.endsAt.toISOString(),
+    },
+  });
 }
 
 /* =========================================================
    HANDLER — subscription.disable
-   =========================================================
- *
- * Subscription fully disabled (either by user or Paystack).
- * Access should be revoked immediately.
- * ========================================================= */
+   ========================================================= */
 
 async function handleSubscriptionDisable(data: PaystackSubscriptionData) {
   const subscriptionCode = data.subscription_code;
@@ -552,15 +574,24 @@ async function handleSubscriptionDisable(data: PaystackSubscriptionData) {
       updatedAt: new Date(),
     })
     .where(eq(subscriptions.id, existing.id));
+
+  /* ---------- Notify: subscription cancelled ---------- */
+
+  await createNotification({
+    userId: existing.userId,
+    type: "subscription.cancelled",
+    title: "Subscription cancelled",
+    body: "Your subscription has been cancelled. You can resubscribe anytime from the pricing page.",
+    actionUrl: "/pricing",
+    metadata: {
+      subscriptionId: existing.id,
+    },
+  });
 }
 
 /* =========================================================
    HANDLER — invoice.payment_failed
-   =========================================================
- *
- * A renewal charge failed (expired card, insufficient funds).
- * Paystack retries automatically for a few days.
- * ========================================================= */
+   ========================================================= */
 
 async function handleInvoicePaymentFailed(data: PaystackInvoiceData) {
   const subscriptionCode = data.subscription?.subscription_code;
@@ -591,13 +622,17 @@ async function handleInvoicePaymentFailed(data: PaystackInvoiceData) {
     })
     .where(eq(subscriptions.id, existing.id));
 
-  /* TODO: send the user an email prompting them to update their card. */
-  console.warn(
-    "invoice.payment_failed: user needs to update payment method",
-    {
+  /* ---------- Notify: payment failed ---------- */
+
+  await createNotification({
+    userId: existing.userId,
+    type: "payment.failed",
+    title: "Payment failed",
+    body: "We couldn't charge your card. Update your payment details to keep your subscription active.",
+    actionUrl: "/dashboard/subscription",
+    metadata: {
       subscriptionId: existing.id,
-      userId: existing.userId,
-      subscriptionCode,
-    }
-  );
+      amount: data.amount ?? null,
+    },
+  });
 }

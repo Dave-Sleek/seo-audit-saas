@@ -7,6 +7,7 @@ import { getCurrentUser } from "@/app/lib/auth";
 import { db } from "@/app/db";
 import { users, twoFactorRecoveryCodes } from "@/app/db/schema";
 import { decrypt } from "@/app/lib/crypto";
+import { createNotification } from "@/app/lib/notifications";
 
 const RECOVERY_CODE_COUNT = 10;
 
@@ -68,11 +69,6 @@ export async function POST(request: Request) {
 
   const secret = decrypt(freshUser.twoFactorSecret);
 
-  /*
-   * v13 API: verify() is async and returns { valid: boolean }.
-   * epochTolerance is in seconds — 30 means ±30s of clock drift
-   * (same as the old `window: 1` on a 30s step).
-   */
   let valid = false;
 
   try {
@@ -83,7 +79,6 @@ export async function POST(request: Request) {
     });
     valid = result.valid;
   } catch {
-    // Malformed token (wrong length, non-numeric, etc.)
     valid = false;
   }
 
@@ -117,12 +112,6 @@ export async function POST(request: Request) {
     );
 
     // Enable TOTP 2FA.
-    //
-    // - Keep twoFactorSecret (it's the secret they just verified).
-    // - Set twoFactorMethod so the login route picks TOTP.
-    // - Clear any leftover email code from a previous
-    //   enrollment attempt so the login route doesn't get
-    //   confused about which method is active.
     await tx
       .update(users)
       .set({
@@ -133,6 +122,22 @@ export async function POST(request: Request) {
         updatedAt: new Date(),
       })
       .where(eq(users.id, user.id));
+  });
+
+  /* ---------- Notify: 2FA enabled ----------
+   *
+   * Fires AFTER the transaction commits, so we never send a
+   * "2FA enabled" notification for a state change that rolled
+   * back. createNotification uses its own connection, not the
+   * (already closed) transaction.
+   */
+
+  await createNotification({
+    userId: user.id,
+    type: "security.2fa_enabled",
+    title: "Two-factor authentication enabled",
+    body: "Your account now requires a code at sign-in.",
+    actionUrl: "/dashboard/settings",
   });
 
   /* ---------- Return raw codes ONCE ---------- */

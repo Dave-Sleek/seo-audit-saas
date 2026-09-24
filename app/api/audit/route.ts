@@ -16,6 +16,8 @@ import {
 
 import { getCurrentUser } from "@/app/lib/auth";
 
+import { createNotification } from "@/app/lib/notifications";
+
 import { crawlWebsite } from "@/app/lib/seo/crawler";
 
 import {
@@ -239,6 +241,29 @@ function featureAccessResponse(access: {
 }
 
 /* =========================================================
+   RESPONSE PAGE SHAPE
+========================================================= */
+
+/**
+ * Shape of each page in the API response's `pages` array.
+ *
+ * The `id` is the audit_pages UUID, needed by the client so
+ * React has a stable key for rendering rows. Without it, the
+ * dashboard component falls back to `page.url`, which works
+ * but is fragile (URLs can collide after canonicalization).
+ */
+type ResponsePage = {
+  id: string;
+  url: string;
+  finalUrl: string | null;
+  statusCode: number | null;
+  contentType: string | null;
+  redirectCount: number;
+  redirectChain: unknown;
+  responseTimeMs: number;
+};
+
+/* =========================================================
    POST
 ========================================================= */
 
@@ -252,6 +277,10 @@ export async function POST(request: NextRequest) {
 
   // Kept for the failure-path refund call — user is stable across the request.
   let currentUserId: string | null = null;
+
+  // Captured so the catch block can notify the correct user.
+  let currentDomain: string | null = null;
+  let currentProjectId: string | null = null;
 
   try {
     /* -----------------------------------------------------
@@ -392,21 +421,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    currentDomain = domain;
+
     /* -----------------------------------------------------
        ATOMIC AUDIT + PROJECT RESERVATION
     ----------------------------------------------------- */
-
-    /**
-     * reserveAuditAndProject() performs all three operations
-     * atomically inside one database transaction:
-     *
-     *   - project limit check
-     *   - project creation (if needed)
-     *   - audit quota consumption
-     *
-     * Do NOT perform these separately — the atomic version is
-     * the only safe way to avoid over-consumption.
-     */
 
     reservation = await reserveAuditAndProject(user.id, {
       name: domain,
@@ -448,6 +467,8 @@ export async function POST(request: NextRequest) {
       throw new Error("Audit reservation completed without a project.");
     }
 
+    currentProjectId = project.id;
+
     /* -----------------------------------------------------
        AUTHORITATIVE PLAN
     ----------------------------------------------------- */
@@ -467,13 +488,11 @@ export async function POST(request: NextRequest) {
     try {
       maxPages = getSafePageLimit(reservedPlan.pagesPerAudit);
     } catch {
-      // We reserved quota; refund it since we can't proceed.
       await refundAuditReservation(user.id, {
         projectCreated: reservation.projectCreated,
         projectId: reservation.project?.id,
       });
 
-      // Clear the local flag so the catch block doesn't double-refund.
       reservation = null;
 
       return NextResponse.json(
@@ -547,6 +566,13 @@ export async function POST(request: NextRequest) {
 
     const categoryScores = createEmptyAggregate();
     const priorityIssues: PriorityIssue[] = [];
+
+    /*
+     * Enriched page data for the response. Captures the DB
+     * `id` returned from the insert, which the client needs
+     * as a React key. Populated inside the analysis loop.
+     */
+    const responsePages: ResponsePage[] = [];
 
     /* -----------------------------------------------------
        ANALYZE PAGES
@@ -622,6 +648,22 @@ export async function POST(request: NextRequest) {
         throw new Error(`Unable to save audit page: ${crawledPage.url}`);
       }
 
+      /*
+       * Capture the inserted row's id for the response.
+       * Do this immediately after the insert so the enriched
+       * page always lines up with the DB row.
+       */
+      responsePages.push({
+        id: auditPage.id,
+        url: crawledPage.url,
+        finalUrl: crawledPage.finalUrl,
+        statusCode: crawledPage.statusCode,
+        contentType: crawledPage.contentType,
+        redirectCount: crawledPage.redirectCount,
+        redirectChain: crawledPage.redirectChain,
+        responseTimeMs: crawledPage.responseTimeMs,
+      });
+
       /* ---------------------------------------------------
          SAVE ISSUES
       --------------------------------------------------- */
@@ -646,18 +688,9 @@ export async function POST(request: NextRequest) {
        RECORD CRAWLED PAGES (reporting counter, on success)
     ----------------------------------------------------- */
 
-    /**
-     * Moved AFTER the analysis loop so that failed audits don't
-     * inflate the pages-crawled counter.
-     *
-     * This is a report-only metric — it does NOT enforce pagesPerAudit.
-     * Enforcement already happened via crawlWebsite(url, maxPages).
-     */
-
     try {
       await recordPagesCrawled(user.id, crawledPages.length);
     } catch (recordError) {
-      // Reporting failure must not fail the audit.
       console.error("Unable to record crawled pages:", recordError);
     }
 
@@ -709,6 +742,28 @@ export async function POST(request: NextRequest) {
     const completedAudit = updatedAudits[0];
 
     /* -----------------------------------------------------
+       NOTIFY — AUDIT COMPLETED
+    ----------------------------------------------------- */
+
+    await createNotification({
+      userId: user.id,
+      type: "audit.completed",
+      title: `Audit complete for ${domain}`,
+      body: `Score: ${averageScore}/100 · ${pagesWithErrors} page${
+        pagesWithErrors === 1 ? "" : "s"
+      } with errors.`,
+      actionUrl: `/dashboard/audits/${audit.id}`,
+      metadata: {
+        auditId: audit.id,
+        projectId: project.id,
+        domain,
+        score: averageScore,
+        pagesCrawled: crawledPages.length,
+        pagesWithErrors,
+      },
+    });
+
+    /* -----------------------------------------------------
        RESPONSE
     ----------------------------------------------------- */
 
@@ -742,15 +797,7 @@ export async function POST(request: NextRequest) {
         categoryScores,
         priorityIssues: uniquePriorityIssues,
       },
-      pages: crawledPages.map((page) => ({
-        url: page.url,
-        finalUrl: page.finalUrl,
-        statusCode: page.statusCode,
-        contentType: page.contentType,
-        redirectCount: page.redirectCount,
-        redirectChain: page.redirectChain,
-        responseTimeMs: page.responseTimeMs,
-      })),
+      pages: responsePages,
     });
   } catch (error) {
     console.error("Audit error:", error);
@@ -779,15 +826,6 @@ export async function POST(request: NextRequest) {
        REFUND RESERVATION
     ----------------------------------------------------- */
 
-    /**
-     * If the audit failed AFTER the reservation succeeded,
-     * refund the quota and deactivate the project if it was
-     * created solely for this failed attempt.
-     *
-     * If the reservation never succeeded (still null, or
-     * already refunded above), skip.
-     */
-
     if (reservation?.allowed && currentUserId) {
       try {
         await refundAuditReservation(currentUserId, {
@@ -797,6 +835,30 @@ export async function POST(request: NextRequest) {
       } catch (refundError) {
         console.error("Unable to refund audit reservation:", refundError);
       }
+    }
+
+    /* -----------------------------------------------------
+       NOTIFY — AUDIT FAILED
+    ----------------------------------------------------- */
+
+    if (currentUserId && auditId && currentDomain) {
+      const failureMessage =
+        error instanceof Error ? error.message : "Audit failed.";
+
+      await createNotification({
+        userId: currentUserId,
+        type: "audit.failed",
+        title: `Audit failed for ${currentDomain}`,
+        body: failureMessage,
+        actionUrl: currentProjectId
+          ? `/dashboard/projects/${currentProjectId}`
+          : "/dashboard",
+        metadata: {
+          auditId,
+          projectId: currentProjectId,
+          domain: currentDomain,
+        },
+      });
     }
 
     /* -----------------------------------------------------

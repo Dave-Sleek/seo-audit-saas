@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import CancelSubscriptionButton from "@/app/components/ui/cancel-subscription-button";
 
 import { getCurrentUser } from "@/app/lib/auth";
 import { getUsageSummary } from "@/app/lib/usage";
+import { calculateEndDate } from "@/app/lib/subscription";
 
 /* =========================================================
    HELPERS
@@ -25,6 +27,82 @@ function daysUntil(date: Date): number {
   return Math.ceil(ms / (1000 * 60 * 60 * 24));
 }
 
+/**
+ * Convert a plan interval into the singular unit noun for UI copy.
+ */
+function normalizeInterval(interval: string): string {
+  switch (interval.toLowerCase()) {
+    case "monthly":
+      return "month";
+    case "yearly":
+    case "annual":
+      return "year";
+    case "weekly":
+      return "week";
+    case "daily":
+      return "day";
+    case "quarterly":
+      return "quarter";
+    case "biannual":
+    case "semiannual":
+      return "6 months";
+    default:
+      return "period";
+  }
+}
+
+/**
+ * Plural form of the interval unit.
+ */
+function pluralizeInterval(interval: string): string {
+  switch (interval.toLowerCase()) {
+    case "monthly":
+      return "months";
+    case "yearly":
+    case "annual":
+      return "years";
+    case "weekly":
+      return "weeks";
+    case "daily":
+      return "days";
+    case "quarterly":
+      return "quarters";
+    case "biannual":
+    case "semiannual":
+      return "6-month periods";
+    default:
+      return "periods";
+  }
+}
+
+/**
+ * How many whole intervals does this subscription cover?
+ *
+ * When a user pays for the same plan twice in a row, the
+ * subscription's endsAt is pushed forward by another interval
+ * without a new row. That produces a subscription whose span
+ * is a multiple of its interval. This computes that multiple
+ * so the UI can say "2 months prepaid" instead of showing a
+ * single misleading period.
+ *
+ * Returns at least 1.
+ */
+function paidPeriods(
+  startsAt: Date,
+  endsAt: Date,
+  interval: string
+): number {
+  const oneInterval = calculateEndDate(startsAt, interval);
+
+  const intervalMs =
+    oneInterval.getTime() - startsAt.getTime();
+  const totalMs = endsAt.getTime() - startsAt.getTime();
+
+  if (intervalMs <= 0) return 1;
+
+  return Math.max(1, Math.round(totalMs / intervalMs));
+}
+
 /* =========================================================
    USAGE BAR
 ========================================================= */
@@ -40,10 +118,6 @@ function UsageBar({
   limit: number;
   hint?: string;
 }) {
-  /*
-   * Special case: the plan does not include this feature.
-   * A limit of 0 means "not available", not "fully used".
-   */
   if (limit === 0) {
     return (
       <div
@@ -156,11 +230,6 @@ export default async function SubscriptionPage() {
 
   const summary = await getUsageSummary(user.id);
 
-  console.log(
-  "[subscription-debug]",
-  JSON.stringify(summary, null, 2)
-);
-
   /* ---------- NO SUBSCRIPTION ---------- */
 
   if (!summary.subscription || !summary.plan) {
@@ -238,18 +307,57 @@ export default async function SubscriptionPage() {
   const pagesCrawled = usage?.pagesCrawled ?? 0;
   const aiRecommendationsUsed = usage?.aiRecommendationsUsed ?? 0;
 
+  const isWithinPeriod = subscription.endsAt > new Date();
+
   const isActive =
-    subscription.status === "active" &&
-    subscription.endsAt > new Date();
+    (subscription.status === "active" ||
+      subscription.status === "non_renewing") &&
+    isWithinPeriod;
+
+  const isPastDue = subscription.status === "past_due" && isWithinPeriod;
+  const isNonRenewing =
+    subscription.status === "non_renewing" && isWithinPeriod;
+  const isExpired = !isWithinPeriod;
 
   const daysLeft = daysUntil(subscription.endsAt);
   const expiringSoon =
     isActive && daysLeft > 0 && daysLeft <= 7;
-  const expired = !isActive;
 
-  /* ---------- Expiry math for audits hint ---------- */
+  /* ---------- Derived values ---------- */
 
   const auditsRemaining = Math.max(0, plan.auditLimit - auditsUsed);
+  const projectsRemaining = Math.max(
+    0,
+    plan.maxProjects - summary.projectsUsed
+  );
+
+  const auditsHint =
+    auditsRemaining === 0
+      ? "At limit — upgrade for more"
+      : auditsRemaining <= 5
+        ? "Running low"
+        : undefined;
+
+  const projectsHint =
+    projectsRemaining === 0
+      ? "At limit — delete a project or upgrade"
+      : "Active projects";
+
+  /*
+   * How many paid intervals does this subscription cover?
+   *
+   * For a single-month subscription this is 1. When the user
+   * has pre-paid for multiple months (bought the same plan
+   * again while still active), endsAt is extended and this
+   * becomes 2, 3, etc. The UI uses it to label the billing
+   * cell as "2 months prepaid" rather than implying a single
+   * ambiguous period.
+   */
+  const periods = paidPeriods(
+    subscription.startsAt,
+    subscription.endsAt,
+    plan.interval
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -272,7 +380,7 @@ export default async function SubscriptionPage() {
           </Link>
 
           <Link
-            href="/pricing"
+            href="/pricing?from=dashboard"
             className="btn-stripe btn-stripe-primary"
           >
             Change plan
@@ -280,9 +388,85 @@ export default async function SubscriptionPage() {
         </div>
       </div>
 
-      {/* ---------- Expiry warning ---------- */}
+      {/* ---------- Past due warning ---------- */}
 
-      {expiringSoon && (
+      {isPastDue && (
+        <div className="stripe-alert stripe-alert-danger">
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ flexShrink: 0, marginTop: 1 }}
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <div>
+            <div className="font-semibold">
+              We couldn&apos;t process your last payment
+            </div>
+            <div className="mt-0.5">
+              Update your payment method to keep your subscription active.
+              Your plan will remain usable until{" "}
+              {formatDate(subscription.endsAt)}.{" "}
+              <Link
+                href="/dashboard/subscription/update-payment"
+                className="stripe-link"
+              >
+                Update payment method
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------- Non-renewing notice ---------- */}
+
+      {isNonRenewing && (
+        <div className="stripe-alert stripe-alert-warning">
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ flexShrink: 0, marginTop: 1 }}
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <div>
+            <div className="font-semibold">Auto-renewal is off</div>
+            <div className="mt-0.5">
+              Your subscription will end on{" "}
+              {formatDate(subscription.endsAt)}. Re-enable auto-renewal to
+              keep your plan active without interruption.{" "}
+              <Link
+                href="/pricing?from=dashboard"
+                className="stripe-link"
+              >
+                Choose a plan
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------- Expiring soon ---------- */}
+
+      {expiringSoon && !isNonRenewing && !isPastDue && (
         <div className="stripe-alert stripe-alert-warning">
           <svg
             width="18"
@@ -307,7 +491,10 @@ export default async function SubscriptionPage() {
             </div>
             <div className="mt-0.5">
               Renew now to keep running audits without interruption.{" "}
-              <Link href="/pricing" className="stripe-link">
+              <Link
+                href="/pricing?from=dashboard"
+                className="stripe-link"
+              >
                 Choose a plan
               </Link>
             </div>
@@ -315,7 +502,9 @@ export default async function SubscriptionPage() {
         </div>
       )}
 
-      {expired && (
+      {/* ---------- Expired ---------- */}
+
+      {isExpired && (
         <div className="stripe-alert stripe-alert-danger">
           <svg
             width="18"
@@ -390,9 +579,13 @@ export default async function SubscriptionPage() {
 
             <span
               className={`stripe-badge ${
-                isActive
-                  ? "stripe-badge-success"
-                  : "stripe-badge-danger"
+                isExpired
+                  ? "stripe-badge-danger"
+                  : isPastDue
+                    ? "stripe-badge-danger"
+                    : isNonRenewing
+                      ? "stripe-badge-warning"
+                      : "stripe-badge-success"
               }`}
             >
               <span
@@ -400,13 +593,22 @@ export default async function SubscriptionPage() {
                   width: 6,
                   height: 6,
                   borderRadius: "50%",
-                  background: isActive
-                    ? "var(--success)"
-                    : "var(--danger)",
+                  background:
+                    isExpired || isPastDue
+                      ? "var(--danger)"
+                      : isNonRenewing
+                        ? "var(--warning)"
+                        : "var(--success)",
                 }}
                 aria-hidden="true"
               />
-              {isActive ? "Active" : "Expired"}
+              {isExpired
+                ? "Expired"
+                : isPastDue
+                  ? "Payment failed"
+                  : isNonRenewing
+                    ? "Non-renewing"
+                    : "Active"}
             </span>
           </div>
         </header>
@@ -427,7 +629,9 @@ export default async function SubscriptionPage() {
               className="mt-1 text-sm"
               style={{ color: "var(--text-muted)" }}
             >
-              Subscription interval
+              {periods > 1
+                ? `${periods} ${pluralizeInterval(plan.interval)} prepaid`
+                : "Subscription interval"}
             </div>
           </div>
 
@@ -449,7 +653,11 @@ export default async function SubscriptionPage() {
 
           <div className="p-6">
             <div className="eyebrow mb-2">
-              {isActive ? "Renews / expires" : "Expired"}
+              {isExpired
+                ? "Expired"
+                : isNonRenewing
+                  ? "Access ends"
+                  : "Renews / expires"}
             </div>
             <div
               className="text-lg font-bold"
@@ -461,9 +669,11 @@ export default async function SubscriptionPage() {
               className="mt-1 text-sm"
               style={{ color: "var(--text-muted)" }}
             >
-              {isActive && daysLeft > 0
-                ? `${daysLeft} day${daysLeft === 1 ? "" : "s"} remaining`
-                : "Subscription ended"}
+              {isExpired
+                ? "Subscription ended"
+                : daysLeft > 0
+                  ? `${daysLeft} day${daysLeft === 1 ? "" : "s"} remaining`
+                  : "Ending today"}
             </div>
           </div>
         </div>
@@ -480,27 +690,20 @@ export default async function SubscriptionPage() {
         </header>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {/* SEO audits — this is the primary metric */}
           <UsageBar
             label="SEO audits"
             used={auditsUsed}
             limit={plan.auditLimit}
-            hint={
-              auditsRemaining > 0 && auditsRemaining <= 5
-                ? "Running low"
-                : undefined
-            }
+            hint={auditsHint}
           />
 
-          {/* Projects — concurrent, not per-period */}
           <UsageBar
             label="Projects"
             used={summary.projectsUsed}
             limit={plan.maxProjects}
-            hint="Active projects"
+            hint={projectsHint}
           />
 
-          {/* AI recommendations — 0 means "not included" */}
           <UsageBar
             label="AI recommendations"
             used={aiRecommendationsUsed}
@@ -512,7 +715,6 @@ export default async function SubscriptionPage() {
             }
           />
 
-          {/* Pages crawled — reporting metric, no period limit */}
           <div
             className="rounded-xl border p-5"
             style={{
@@ -626,26 +828,56 @@ export default async function SubscriptionPage() {
         </div>
       </section>
 
+      {/* ---------- Cancel Subscription ------------ */}
+
+      {isActive && !isNonRenewing && !isPastDue && (
+        <section
+          className="stripe-panel"
+          style={{ borderColor: "var(--danger-light)" }}
+        >
+          <div className="flex flex-col gap-5 px-6 py-6 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2
+                className="section-title"
+                style={{ color: "var(--danger)" }}
+              >
+                Cancel subscription
+              </h2>
+              <p className="section-description">
+                Your access continues until{" "}
+                {formatDate(subscription.endsAt)}, then ends.
+              </p>
+            </div>
+            <CancelSubscriptionButton
+              planName={plan.name}
+              endsAt={subscription.endsAt.toISOString()}
+            />
+          </div>
+        </section>
+      )}
+
       {/* ---------- Upgrade CTA ---------- */}
 
-      <section className="stripe-panel">
-        <div className="flex flex-col gap-5 px-6 py-6 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="section-title">Need more capacity?</h2>
-            <p className="section-description">
-              Upgrade your plan to increase your audit, project, page,
-              and AI recommendation limits.
-            </p>
-          </div>
+      {!isNonRenewing && !isExpired && (
+        <section className="stripe-panel">
+          <div className="flex flex-col gap-5 px-6 py-6 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="section-title">Need more capacity?</h2>
+              <p className="section-description">
+                Upgrade your plan to increase your audit, project, page,
+                and AI recommendation limits.
+              </p>
+            </div>
 
-          <Link
-            href="/pricing"
-            className="btn-stripe btn-stripe-primary shrink-0"
-          >
-            Compare plans
-          </Link>
-        </div>
-      </section>
+            <Link
+              href="/pricing?from=dashboard"
+              className="btn-stripe btn-stripe-primary shrink-0"
+            >
+              Compare plans
+            </Link>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

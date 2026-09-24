@@ -7,12 +7,15 @@ import { createHash } from "crypto";
 import { getCurrentUser, verifyPassword } from "@/app/lib/auth";
 import { db } from "@/app/db";
 import { users, twoFactorRecoveryCodes } from "@/app/db/schema";
+import { createNotification } from "@/app/lib/notifications";
 
 function hashCode(code: string) {
   return createHash("sha256").update(code).digest("hex");
 }
 
 export async function POST(request: Request) {
+  /* ---------- Auth ---------- */
+
   const user = await getCurrentUser();
 
   if (!user) {
@@ -22,7 +25,10 @@ export async function POST(request: Request) {
     );
   }
 
+  /* ---------- Parse body ---------- */
+
   const body = await request.json().catch(() => null);
+
   const password =
     typeof body?.password === "string" ? body.password : "";
   const code = typeof body?.code === "string" ? body.code.trim() : "";
@@ -102,7 +108,7 @@ export async function POST(request: Request) {
     );
   }
 
-  /* ---------- Disable 2FA ---------- */
+  /* ---------- Disable 2FA in a transaction ---------- */
 
   await db.transaction(async (tx) => {
     await tx
@@ -120,6 +126,22 @@ export async function POST(request: Request) {
         updatedAt: new Date(),
       })
       .where(eq(users.id, user.id));
+  });
+
+  /* ---------- Notify: 2FA disabled ----------
+   *
+   * Fires AFTER the transaction commits. If the transaction
+   * rolled back (DB error), we would never reach this line, so
+   * we never send a "2FA disabled" notification for a state
+   * change that didn't actually happen.
+   */
+
+  await createNotification({
+    userId: user.id,
+    type: "security.2fa_disabled",
+    title: "Two-factor authentication disabled",
+    body: "If you didn't do this, secure your account immediately.",
+    actionUrl: "/dashboard/settings",
   });
 
   return NextResponse.json({ success: true });
