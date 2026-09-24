@@ -1,9 +1,8 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 
-import { getCurrentUser } from "@/app/lib/auth";
 import AccountMenu from "@/app/components/ui/account-menu";
 import LogoutButton from "@/app/components/ui/logout-button";
+import { requireVerifiedUser } from "@/app/lib/auth-guards";
 
 /* =========================================================
    LAYOUT
@@ -14,11 +13,13 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const user = await getCurrentUser();
-
-  if (!user) {
-    redirect("/login");
-  }
+  /*
+   * This is the single gate for the entire /dashboard/*
+   * tree. requireVerifiedUser() redirects unauthenticated
+   * users to /login and unverified users to /verify-email,
+   * so nothing below this line needs its own check.
+   */
+  const user = await requireVerifiedUser();
 
   return (
     <div className="app-shell flex">
@@ -61,6 +62,7 @@ export default async function DashboardLayout({
           <NavLink href="/dashboard/profile" icon={<UserIcon />}>
             Profile
           </NavLink>
+
           <NavLink href="/dashboard/settings" icon={<SettingsIcon />}>
             Settings
           </NavLink>
@@ -108,7 +110,12 @@ export default async function DashboardLayout({
           </div>
 
           {/* Right: account menu */}
-          <AccountMenu user={user} />
+          <AccountMenu
+            user={{
+              name: user.name ?? null,
+              email: user.email,
+            }}
+          />
         </header>
 
         {/* ---------- PAGE CONTENT ---------- */}

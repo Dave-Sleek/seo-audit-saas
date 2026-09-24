@@ -1,11 +1,18 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
+import { randomBytes, createHash } from "crypto";
 
 import { grantFreeSubscription } from "@/app/lib/subscription";
-import { sendWelcomeEmail } from "@/app/lib/email/send";
+import {
+  sendVerificationEmail,
+  sendWelcomeEmail,
+} from "@/app/lib/email/send";
 
 import { db } from "@/app/db";
-import { users } from "@/app/db/schema";
+import {
+  users,
+  emailVerificationTokens,
+} from "@/app/db/schema";
 
 import {
   createSession,
@@ -89,6 +96,41 @@ export async function POST(request: Request) {
     /* ---------- Create session ---------- */
 
     await createSession(user.id);
+
+    /* ---------- Send verification email ----------
+     *
+     * Generates a single-use verification token, stores
+     * its hash, and sends the raw token in the email link.
+     *
+     * Failures are logged but do not fail signup — the
+     * user can request a new link from /verify-email.
+     */
+    try {
+      const rawToken = randomBytes(32).toString("hex");
+      const tokenHash = createHash("sha256")
+        .update(rawToken)
+        .digest("hex");
+      const expiresAt = new Date(
+        Date.now() + 24 * 60 * 60 * 1000
+      );
+
+      await db.insert(emailVerificationTokens).values({
+        userId: user.id,
+        tokenHash,
+        expiresAt,
+      });
+
+      await sendVerificationEmail({
+        to: user.email,
+        name: user.name,
+        token: rawToken,
+      });
+    } catch (verifyError) {
+      console.error(
+        "[signup] verification email failed:",
+        verifyError
+      );
+    }
 
     /* ---------- Grant Free subscription ----------
      *

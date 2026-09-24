@@ -2,6 +2,7 @@ import { resend, FROM_EMAIL, APP_URL } from "./client";
 import { WelcomeEmail } from "./templates/welcome";
 import { ResetPasswordEmail } from "./templates/reset-password";
 import { TwoFactorCodeEmail } from "./templates/two-factor-code";
+import { VerifyEmail } from "./templates/verify-email";
 
 /* =========================================================
    LOGGING HELPERS
@@ -210,6 +211,68 @@ export async function sendTwoFactorCodeEmail(params: {
   } catch (err) {
     logSendFailure(
       "2FA code send (threw)",
+      { to: params.to, subject },
+      err
+    );
+    return false;
+  }
+}
+
+/* =========================================================
+   EMAIL VERIFICATION
+========================================================= */
+
+export async function sendVerificationEmail(params: {
+  to: string;
+  name: string;
+  token: string;
+}): Promise<boolean> {
+  if (!resend) {
+    console.warn(
+      "[email] sendVerificationEmail skipped: Resend not configured"
+    );
+    return false;
+  }
+
+  /*
+   * The link points at the API route, not a page. When the
+   * user clicks, the route validates the token, marks the
+   * email as verified, and redirects to the dashboard.
+   */
+  const verifyUrl = `${APP_URL}/verify-email/confirm?token=${encodeURIComponent(
+  params.token
+  )}`;
+
+  const subject = "Verify your email";
+
+  try {
+    const { data, error } = await resend.emails.send({
+      from: FROM_EMAIL,
+      to: params.to,
+      subject,
+      react: VerifyEmail({
+        name: params.name,
+        verifyUrl,
+      }),
+    });
+
+    if (error) {
+      logSendFailure(
+        "verification send",
+        { to: params.to, subject },
+        error
+      );
+      return false;
+    }
+
+    console.log("[email] verification sent", {
+      to: params.to,
+      id: data?.id,
+    });
+    return true;
+  } catch (err) {
+    logSendFailure(
+      "verification send (threw)",
       { to: params.to, subject },
       err
     );

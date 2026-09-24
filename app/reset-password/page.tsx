@@ -120,7 +120,7 @@ function ResetPasswordForm() {
         </p>
 
         <Link
-          href="/login"
+          href="/login" style={{ color: "#ffffff" }}
           className="mt-6 inline-block rounded-lg bg-slate-900 px-5 py-3 text-sm font-semibold text-white"
         >
           Sign in

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import DeleteProjectButton from "@/app/components/ui/delete-project-button";
 
 type HistoryItem = {
   id: string;
@@ -674,6 +675,40 @@ export default function ProjectAuditHistory({
           )}
         </div>
       )}
+      
+      {/* =====================================================
+          Danger zone — Delete project
+          ===================================================== */}
+
+      <section className="stripe-panel border-red-200">
+        <div className="flex flex-col gap-5 px-5 py-5 sm:flex-row sm:items-center sm:justify-between lg:px-6">
+          <div>
+            <h3
+              className="section-title"
+              style={{ color: "var(--danger, #dc2626)" }}
+            >
+              Danger zone
+            </h3>
+
+            <p className="section-description">
+              Deleting this project will permanently remove it
+              and all{" "}
+              <strong className="text-slate-700">
+                {totalAudits}{" "}
+                {totalAudits === 1 ? "audit" : "audits"}
+              </strong>{" "}
+              associated with it. This action cannot be undone.
+            </p>
+          </div>
+
+          <DeleteProjectButton
+            projectId={data.project.id}
+            projectName={data.project.name}
+            projectDomain={data.project.domain}
+            auditCount={totalAudits}
+          />
+        </div>
+      </section>
     </div>
   );
 }
