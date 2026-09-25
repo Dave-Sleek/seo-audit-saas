@@ -39,6 +39,11 @@ export default function AdminOverviewPage() {
             title="Audit log"
             description="Review security events across all accounts."
           />
+          <AdminCard
+              href="/dashboard/admin/contact"
+              title="Contact messages"
+              description="Read and reply to messages from the public contact form."
+            />
         </div>
     </div>
   );

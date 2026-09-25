@@ -175,7 +175,6 @@ export default function AccountMenu({
                 <span>Projects</span>
               </Link>
 
-              {/* 👇 NEW */}
               <Link
                 href="/dashboard/team"
                 onClick={() => setOpen(false)}
@@ -245,6 +244,16 @@ export default function AccountMenu({
                 <i className="bi bi-question-circle w-5 text-center text-slate-500" />
                 <span>Support</span>
               </Link>
+
+              <Link
+                  href="/dashboard/contact"
+                  onClick={() => setOpen(false)}
+                  className={itemClass}
+                  role="menuitem"
+                >
+                  <i className="bi bi-envelope w-5 text-center text-slate-500" />
+                  <span>My messages</span>
+                </Link>
             </div>
 
             {/* Logout */}

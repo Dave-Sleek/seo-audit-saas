@@ -11,6 +11,7 @@ import {
   jsonb,
   index,
   uniqueIndex,
+  check,
 } from "drizzle-orm/pg-core";
 
 /**
@@ -1127,3 +1128,93 @@ export const projectCollaborators = pgTable(
 
 export type ProjectCollaborator =
   typeof projectCollaborators.$inferSelect;
+
+
+/* =========================================================
+   CONTACT MESSAGES
+========================================================= */
+
+export const contactMessages = pgTable(
+  "contact_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+
+    /**
+     * Set when the sender is signed in. Null for anonymous
+     * submissions. ON DELETE SET NULL so deleting a user
+     * doesn't wipe their contact history.
+     */
+    userId: uuid("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+
+    name: varchar("name", { length: 255 }),
+
+    email: varchar("email", { length: 255 }).notNull(),
+
+    subject: varchar("subject", { length: 255 }),
+
+    message: text("message").notNull(),
+
+    status: varchar("status", { length: 50 })
+      .notNull()
+      .default("unread"),
+
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    statusCheck: check(
+      "contact_messages_status_check",
+      sql`${table.status} IN ('unread', 'read', 'replied', 'closed')`
+    ),
+
+    statusIdx: index("contact_messages_status_idx").on(table.status),
+
+    createdAtIdx: index("contact_messages_created_at_idx").on(
+      table.createdAt
+    ),
+
+    userIdx: index("contact_messages_user_id_idx").on(table.userId),
+  })
+);
+
+export type ContactMessage = typeof contactMessages.$inferSelect;
+
+/* =========================================================
+   CONTACT MESSAGE REPLIES
+========================================================= */
+
+export const contactMessageReplies = pgTable(
+  "contact_message_replies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+
+    messageId: uuid("message_id")
+      .notNull()
+      .references(() => contactMessages.id, { onDelete: "cascade" }),
+
+    authorId: uuid("author_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+
+    authorRole: varchar("author_role", { length: 20 })
+      .notNull()
+      .default("admin"),
+
+    body: text("body").notNull(),
+
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    messageIdx: index("contact_message_replies_message_id_idx").on(
+      table.messageId
+    ),
+  })
+);
+
+export type ContactMessageReply =
+  typeof contactMessageReplies.$inferSelect;

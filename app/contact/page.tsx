@@ -6,12 +6,53 @@ import Footer from "@/app/components/ui/footer";
 
 export default function ContactPage() {
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (
+    event: FormEvent<HTMLFormElement>
+  ) => {
     event.preventDefault();
 
-    // Email/API integration will be added later.
-    setSubmitted(true);
+    setSubmitting(true);
+    setError("");
+
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+
+    const payload = {
+      name: String(formData.get("name") ?? ""),
+      email: String(formData.get("email") ?? ""),
+      subject: String(formData.get("subject") ?? ""),
+      message: String(formData.get("message") ?? ""),
+    };
+
+    try {
+      const res = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(
+          data?.error || "Unable to send message."
+        );
+      }
+
+      form.reset();
+      setSubmitted(true);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to send message."
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -19,17 +60,15 @@ export default function ContactPage() {
       <Navbar />
 
       <main>
-        {/* Header */}
+        {/* Header — unchanged */}
         <section className="bg-slate-950 px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
           <div className="mx-auto max-w-4xl text-center">
             <p className="text-sm font-semibold uppercase tracking-wider text-blue-400">
               Contact
             </p>
-
             <h1 className="mt-4 text-4xl font-bold tracking-tight text-white sm:text-6xl">
-              We'd love to hear from you
+              We&apos;d love to hear from you
             </h1>
-
             <p className="mx-auto mt-6 max-w-2xl text-lg leading-8 text-slate-400">
               Have a question, feedback, feature request, or need
               help with your SEO audit? Send us a message.
@@ -37,19 +76,16 @@ export default function ContactPage() {
           </div>
         </section>
 
-        {/* Contact area */}
+        {/* Contact area — unchanged structure */}
         <section className="py-20 sm:py-24">
           <div className="mx-auto grid max-w-7xl gap-12 px-4 sm:px-6 lg:grid-cols-5 lg:px-8">
-            {/* Contact details */}
+            {/* Contact details — unchanged */}
             <div className="lg:col-span-2">
-              <h2 className="text-2xl font-bold">
-                Get in touch
-              </h2>
-
+              <h2 className="text-2xl font-bold">Get in touch</h2>
               <p className="mt-4 leading-7 text-slate-600">
-                We're building this platform to make SEO analysis
-                easier for website owners, developers, marketers,
-                and agencies.
+                We&apos;re building this platform to make SEO
+                analysis easier for website owners, developers,
+                marketers, and agencies.
               </p>
 
               <div className="mt-10 space-y-7">
@@ -57,12 +93,8 @@ export default function ContactPage() {
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-slate-100">
                     ✉
                   </div>
-
                   <div>
-                    <p className="font-semibold">
-                      Email
-                    </p>
-
+                    <p className="font-semibold">Email</p>
                     <a
                       href="mailto:support@seoaudit.com"
                       className="mt-1 block text-sm text-slate-600 hover:text-blue-600"
@@ -76,12 +108,8 @@ export default function ContactPage() {
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-slate-100">
                     ?
                   </div>
-
                   <div>
-                    <p className="font-semibold">
-                      Support
-                    </p>
-
+                    <p className="font-semibold">Support</p>
                     <p className="mt-1 text-sm text-slate-600">
                       For product questions and technical support.
                     </p>
@@ -92,33 +120,12 @@ export default function ContactPage() {
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-slate-100">
                     ◎
                   </div>
-
                   <div>
-                    <p className="font-semibold">
-                      Social
-                    </p>
-
+                    <p className="font-semibold">Social</p>
                     <div className="mt-2 flex gap-4 text-sm">
-                      <a
-                        href="#"
-                        className="text-slate-600 hover:text-slate-900"
-                      >
-                        X
-                      </a>
-
-                      <a
-                        href="#"
-                        className="text-slate-600 hover:text-slate-900"
-                      >
-                        LinkedIn
-                      </a>
-
-                      <a
-                        href="#"
-                        className="text-slate-600 hover:text-slate-900"
-                      >
-                        Facebook
-                      </a>
+                      <a href="#" className="text-slate-600 hover:text-slate-900">X</a>
+                      <a href="#" className="text-slate-600 hover:text-slate-900">LinkedIn</a>
+                      <a href="#" className="text-slate-600 hover:text-slate-900">Facebook</a>
                     </div>
                   </div>
                 </div>
@@ -139,13 +146,16 @@ export default function ContactPage() {
                     </h2>
 
                     <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-slate-600">
-                      Thanks for reaching out. Our contact system
-                      will be connected to email delivery shortly.
+                      Thanks for reaching out. We&apos;ll get back
+                      to you as soon as we can.
                     </p>
 
                     <button
                       type="button"
-                      onClick={() => setSubmitted(false)}
+                      onClick={() => {
+                        setSubmitted(false);
+                        setError("");
+                      }}
                       className="mt-6 text-sm font-semibold text-blue-600 hover:text-blue-700"
                     >
                       Send another message
@@ -173,7 +183,6 @@ export default function ContactPage() {
                           >
                             Name
                           </label>
-
                           <input
                             id="name"
                             name="name"
@@ -191,7 +200,6 @@ export default function ContactPage() {
                           >
                             Email
                           </label>
-
                           <input
                             id="email"
                             name="email"
@@ -210,7 +218,6 @@ export default function ContactPage() {
                         >
                           Subject
                         </label>
-
                         <input
                           id="subject"
                           name="subject"
@@ -228,7 +235,6 @@ export default function ContactPage() {
                         >
                           Message
                         </label>
-
                         <textarea
                           id="message"
                           name="message"
@@ -239,11 +245,18 @@ export default function ContactPage() {
                         />
                       </div>
 
+                      {error && (
+                        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                          {error}
+                        </div>
+                      )}
+
                       <button
                         type="submit"
-                        className="w-full rounded-lg bg-slate-900 px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-slate-800 sm:w-auto"
+                        disabled={submitting}
+                        className="w-full rounded-lg bg-slate-900 px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                       >
-                        Send message
+                        {submitting ? "Sending..." : "Send message"}
                       </button>
                     </form>
                   </>
@@ -253,15 +266,14 @@ export default function ContactPage() {
           </div>
         </section>
 
-        {/* FAQ/contact reassurance */}
+        {/* FAQ/contact reassurance — unchanged */}
         <section className="border-t border-slate-200 bg-slate-50 py-16">
           <div className="mx-auto max-w-3xl px-4 text-center sm:px-6 lg:px-8">
             <h2 className="text-2xl font-bold">
               Need help with an audit?
             </h2>
-
             <p className="mt-3 text-slate-600">
-              Include the website URL you're auditing and a
+              Include the website URL you&apos;re auditing and a
               description of the problem when contacting support.
               This will help us understand the issue faster.
             </p>

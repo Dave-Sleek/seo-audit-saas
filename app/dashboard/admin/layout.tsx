@@ -34,6 +34,7 @@ export default async function AdminLayout({
         <AdminNavLink href="/dashboard/admin/payments">Payments</AdminNavLink>
         <AdminNavLink href="/dashboard/admin/audit-log">Audit log</AdminNavLink>
         <AdminNavLink href="/dashboard/admin/support">Support</AdminNavLink>
+        <AdminNavLink href="/dashboard/admin/contact">Contact Messages</AdminNavLink>
       </div>
 
       {children}

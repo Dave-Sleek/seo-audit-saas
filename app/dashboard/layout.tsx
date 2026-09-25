@@ -75,6 +75,9 @@ export default async function DashboardLayout({
           <NavLink href="/dashboard/support" icon={<HelpIcon />}>
             Support
           </NavLink>
+          <NavLink href="/dashboard/contact" icon={<MessageIcon />}>
+            My messages
+          </NavLink>
         </nav>
 
         {/* ---------- SIDEBAR FOOTER: user + logout ---------- */}
@@ -321,6 +324,23 @@ function HelpIcon() {
       <circle cx="12" cy="12" r="10" />
       <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
       <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  );
+}
+
+function MessageIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </svg>
   );
 }
