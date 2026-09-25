@@ -1,6 +1,4 @@
-// app/lib/email/templates/support-ticket-admin-notify.tsx
 
-import type { CSSProperties } from "react";
 
 interface TicketAdminNotifyEmailProps {
   reference: string;

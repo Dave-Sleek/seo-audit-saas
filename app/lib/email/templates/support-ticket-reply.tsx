@@ -1,7 +1,5 @@
 // app/lib/email/templates/support-ticket-reply.tsx
 
-import type { CSSProperties } from "react";
-
 interface TicketReplyEmailProps {
   name?: string | null;
   reference: string;
