@@ -1,4 +1,5 @@
 // app/dashboard/admin/page.tsx
+
 import Link from "next/link";
 
 export default function AdminOverviewPage() {
@@ -13,22 +14,32 @@ export default function AdminOverviewPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <AdminCard
-          href="/dashboard/admin/plans"
-          title="Plans"
-          description="Create, edit, and deactivate subscription plans."
-        />
-        <AdminCard
-          href="/dashboard/admin/users"
-          title="Users"
-          description="View and manage user accounts."
-        />
-        <AdminCard
-          href="/dashboard/admin/payments"
-          title="Payments"
-          description="Monitor transactions and subscriptions."
-        />
-      </div>
+          <AdminCard
+            href="/dashboard/admin/support"
+            title="Support"
+            description="Respond to user tickets and manage the support queue."
+          />
+          <AdminCard
+            href="/dashboard/admin/plans"
+            title="Plans"
+            description="Create, edit, and deactivate subscription plans."
+          />
+          <AdminCard
+            href="/dashboard/admin/users"
+            title="Users"
+            description="View and manage user accounts."
+          />
+          <AdminCard
+            href="/dashboard/admin/payments"
+            title="Payments"
+            description="Monitor transactions and subscriptions."
+          />
+          <AdminCard
+            href="/dashboard/admin/audit-log"
+            title="Audit log"
+            description="Review security events across all accounts."
+          />
+        </div>
     </div>
   );
 }

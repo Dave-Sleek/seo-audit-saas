@@ -10,35 +10,41 @@ import {
   createTwoFactorChallenge,
 } from "@/app/lib/auth";
 import { sendTwoFactorCodeEmail } from "@/app/lib/email/send";
+import {
+  logAuditEvent,
+  getAuditIp,
+  getAuditUserAgent,
+} from "@/app/lib/audit-log";
 
 function hashCode(code: string) {
   return createHash("sha256").update(code).digest("hex");
 }
 
+/* =========================================================
+   TIMING-SAFE DUMMY HASH
+========================================================= */
+
+/*
+ * A real scrypt hash of the string "dummy-password",
+ * generated with the same parameters as hashPassword().
+ *
+ * Purpose: when the login email doesn't exist, we still run
+ * a real scrypt comparison so the response time is
+ * indistinguishable from a wrong-password attempt on a real
+ * account. This blocks timing-based account enumeration.
+ *
+ * Do NOT replace this with a bcrypt hash — verifyPassword
+ * expects the "salt:hash" scrypt format, and a bcrypt string
+ * would fail the format check and return instantly, defeating
+ * the point.
+ *
+ * To regenerate:
+ *   node -e "const {randomBytes,scryptSync}=require('crypto');const s=randomBytes(16).toString('hex');console.log(s+':'+scryptSync('dummy-password',s,64).toString('hex'))"
+ */
+const DUMMY_PASSWORD_HASH =
+  "ca40bba7b1097ac2058403336827f324:dd257d13a4580640035011c24ffd416b546fb0829a8513bad9007c33d9fa3bee05b3a3cf3b33b0c6165b0aa5ab5540a1932c76b65e66d140eaf0dc8d40addb4b";
+
 export async function POST(request: Request) {
-  /* -----------------------------------------------------
-     RATE LIMIT
-  ----------------------------------------------------- */
-
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    request.headers.get("x-real-ip") ??
-    "unknown";
-
-  const limit = checkLoginRateLimit(ip);
-
-  if (!limit.allowed) {
-    return NextResponse.json(
-      { error: "Too many attempts. Please try again later." },
-      {
-        status: 429,
-        headers: {
-          "Retry-After": String(Math.ceil(limit.retryAfterMs / 1000)),
-        },
-      }
-    );
-  }
-
   /* -----------------------------------------------------
      PARSE BODY
   ----------------------------------------------------- */
@@ -60,6 +66,53 @@ export async function POST(request: Request) {
   }
 
   /* -----------------------------------------------------
+     AUDIT CONTEXT
+  ----------------------------------------------------- */
+
+  /*
+   * Capture the IP and user agent once so every audit entry
+   * in this request uses the same values.
+   */
+  const ip = getAuditIp(request);
+  const userAgent = getAuditUserAgent(request);
+
+  /* -----------------------------------------------------
+     RATE LIMIT — IP AND EMAIL
+  ----------------------------------------------------- */
+
+  /*
+   * Two buckets. A failure in either blocks the attempt.
+   *
+   * - Per-IP: prevents one machine from spraying many accounts.
+   * - Per-email: prevents a botnet from targeting one account
+   *   from many IPs.
+   *
+   * The email bucket uses a hash of the email as the key so
+   * plaintext addresses never linger in the in-memory map.
+   */
+  const emailKey = createHash("sha256").update(email).digest("hex");
+
+  const ipLimit = checkLoginRateLimit(`ip:${ip}`);
+  const emailLimit = checkLoginRateLimit(`email:${emailKey}`);
+
+  if (!ipLimit.allowed || !emailLimit.allowed) {
+    const retryAfterMs = Math.max(
+      ipLimit.allowed ? 0 : ipLimit.retryAfterMs,
+      emailLimit.allowed ? 0 : emailLimit.retryAfterMs
+    );
+
+    return NextResponse.json(
+      { error: "Too many attempts. Please try again later." },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(Math.ceil(retryAfterMs / 1000)),
+        },
+      }
+    );
+  }
+
+  /* -----------------------------------------------------
      LOOK UP USER
   ----------------------------------------------------- */
 
@@ -69,17 +122,32 @@ export async function POST(request: Request) {
     .where(eq(users.email, email))
     .limit(1);
 
-  /*
-   * Dummy comparison keeps timing constant whether or not
-   * the email exists. Prevents account enumeration.
-   */
-  if (!user) {
-    await verifyPassword(
-      password,
-      "$2a$12$K5v8p9xJ3cYQzWZxVZ8eLOrT0qR4b9K2mN7d8F1gH3jP5sQ6uI7vC"
-    );
+  /* -----------------------------------------------------
+     USER NOT FOUND — DUMMY COMPARISON
+  ----------------------------------------------------- */
 
-    recordLoginFailure(ip);
+  if (!user) {
+    /*
+     * Run a real scrypt comparison so timing matches a
+     * wrong-password attempt on a real account. Blocks
+     * timing-based account enumeration.
+     */
+    await verifyPassword(password, DUMMY_PASSWORD_HASH);
+
+    recordLoginFailure(`ip:${ip}`);
+    recordLoginFailure(`email:${emailKey}`);
+
+    await logAuditEvent({
+      userId: null,
+      eventType: "auth.login.failed",
+      severity: "warning",
+      ipAddress: ip,
+      userAgent,
+      metadata: {
+        reason: "unknown_email",
+        attemptedEmail: email,
+      },
+    });
 
     return NextResponse.json(
       { error: "Invalid email or password." },
@@ -94,7 +162,17 @@ export async function POST(request: Request) {
   const valid = await verifyPassword(password, user.passwordHash);
 
   if (!valid) {
-    recordLoginFailure(ip);
+    recordLoginFailure(`ip:${ip}`);
+    recordLoginFailure(`email:${emailKey}`);
+
+    await logAuditEvent({
+      userId: user.id,
+      eventType: "auth.login.failed",
+      severity: "warning",
+      ipAddress: ip,
+      userAgent,
+      metadata: { reason: "wrong_password" },
+    });
 
     return NextResponse.json(
       { error: "Invalid email or password." },
@@ -108,26 +186,19 @@ export async function POST(request: Request) {
 
   if (user.twoFactorEnabledAt) {
     /*
-     * Prefer the explicit `twoFactorMethod` column. If it's
-     * not set (older users, or before migration), fall back
-     * to inference: presence of a TOTP secret → TOTP, else
-     * email.
+     * Prefer the explicit twoFactorMethod column. Fall back
+     * to inference for older users: presence of a TOTP
+     * secret means TOTP, otherwise email.
      */
     const method =
       user.twoFactorMethod ??
       (user.twoFactorSecret ? "totp" : "email");
 
-    console.log("[login] 2FA required", {
-      userId: user.id,
-      method,
-      hasTotp: Boolean(user.twoFactorSecret),
-      storedMethod: user.twoFactorMethod,
-    });
-
     /* ---------- TOTP path ---------- */
 
     if (method === "totp") {
-      clearLoginFailures(ip);
+      clearLoginFailures(`ip:${ip}`);
+      clearLoginFailures(`email:${emailKey}`);
 
       return NextResponse.json({
         requiresTwoFactor: true,
@@ -151,51 +222,38 @@ export async function POST(request: Request) {
       })
       .where(eq(users.id, user.id));
 
-    console.log("[login] 2FA code generated", {
-      userId: user.id,
-      email: user.email,
-      expiresAt: expiresAt.toISOString(),
-    });
-
     /*
-     * sendTwoFactorCodeEmail() returns a boolean. It does NOT
-     * throw on Resend failures — it logs and returns false.
-     * So we need to check the return value, not just wrap in
-     * try/catch.
+     * Fire-and-forget: don't block the response on Resend.
+     *
+     * Note: on serverless platforms, the function may be
+     * frozen after the response is sent and the email may
+     * never go out. Move to a background job queue if you
+     * deploy to Vercel or similar.
      */
-    let emailSent = false;
-    let emailError: unknown = null;
-
-    try {
-      emailSent = await sendTwoFactorCodeEmail({
-        to: user.email,
-        name: user.name,
-        code,
+    void sendTwoFactorCodeEmail({
+      to: user.email,
+      name: user.name,
+      code,
+    })
+      .then((sent) => {
+        if (!sent) {
+          console.error("[login] 2FA email send failed", {
+            userId: user.id,
+            email: user.email,
+          });
+        }
+      })
+      .catch((err) => {
+        console.error("[login] 2FA email threw", {
+          userId: user.id,
+          email: user.email,
+          error: err,
+        });
       });
-    } catch (err) {
-      emailError = err;
-    }
 
-    if (!emailSent) {
-      console.error("[login] 2FA email send failed", {
-        userId: user.id,
-        email: user.email,
-        error: emailError,
-      });
-    } else {
-      console.log("[login] 2FA email sent", {
-        userId: user.id,
-        email: user.email,
-      });
-    }
+    clearLoginFailures(`ip:${ip}`);
+    clearLoginFailures(`email:${emailKey}`);
 
-    clearLoginFailures(ip);
-
-    /*
-     * Return the challenge even if the email failed — the user
-     * will see the code entry screen and can hit Resend.
-     * Failing the login here would leave them stuck.
-     */
     return NextResponse.json({
       requiresTwoFactor: true,
       method: "email",
@@ -207,11 +265,52 @@ export async function POST(request: Request) {
      NO 2FA — CREATE SESSION
   ----------------------------------------------------- */
 
-  clearLoginFailures(ip);
+  clearLoginFailures(`ip:${ip}`);
+  clearLoginFailures(`email:${emailKey}`);
 
   await createSession(user.id);
 
+  await logAuditEvent({
+    userId: user.id,
+    eventType: "auth.login.success",
+    severity: "info",
+    ipAddress: ip,
+    userAgent,
+    metadata: { method: "password" },
+  });
+
   return NextResponse.json({ success: true });
+}
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+/**
+ * Extract the client IP from request headers.
+ *
+ * x-forwarded-for can be spoofed by the client if the app
+ * isn't behind a trusted proxy that strips the incoming
+ * header. Ensure your proxy (Vercel, Cloudflare, nginx) is
+ * configured to overwrite it before the request reaches the
+ * app.
+ *
+ * If neither header is present (direct local development),
+ * falls back to "unknown" — every such request shares one
+ * bucket, which is a DoS vector in production. Configure
+ * the proxy so this case never occurs.
+ */
+function getClientIp(request: Request): string {
+  const xff = request.headers.get("x-forwarded-for");
+  if (xff) {
+    const first = xff.split(",")[0]?.trim();
+    if (first) return first;
+  }
+
+  const real = request.headers.get("x-real-ip");
+  if (real) return real.trim();
+
+  return "unknown";
 }
 
 /* =========================================================
@@ -219,10 +318,12 @@ export async function POST(request: Request) {
 ========================================================= */
 
 /*
- * In-memory rate limiter. Fine for a single-instance
- * deployment, but on Vercel/serverless each invocation may
- * be a different process — replace with Redis, Upstash, or
- * a Postgres-backed counter if you deploy multi-instance.
+ * In-memory rate limiter. Keyed by "ip:<addr>" or
+ * "email:<sha256>", each with its own bucket.
+ *
+ * Works for a single Node process. On serverless or
+ * multi-instance deployments, replace with Redis, Upstash,
+ * or a Postgres-backed counter.
  */
 
 const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
@@ -235,12 +336,12 @@ type RateBucket = {
 
 const loginBuckets = new Map<string, RateBucket>();
 
-function checkLoginRateLimit(ip: string): {
+function checkLoginRateLimit(key: string): {
   allowed: boolean;
   retryAfterMs: number;
 } {
   const now = Date.now();
-  const bucket = loginBuckets.get(ip);
+  const bucket = loginBuckets.get(key);
 
   if (!bucket || bucket.resetAt < now) {
     return { allowed: true, retryAfterMs: 0 };
@@ -256,12 +357,12 @@ function checkLoginRateLimit(ip: string): {
   return { allowed: true, retryAfterMs: 0 };
 }
 
-function recordLoginFailure(ip: string): void {
+function recordLoginFailure(key: string): void {
   const now = Date.now();
-  const bucket = loginBuckets.get(ip);
+  const bucket = loginBuckets.get(key);
 
   if (!bucket || bucket.resetAt < now) {
-    loginBuckets.set(ip, {
+    loginBuckets.set(key, {
       failures: 1,
       resetAt: now + LOGIN_WINDOW_MS,
     });
@@ -271,28 +372,28 @@ function recordLoginFailure(ip: string): void {
   bucket.failures += 1;
 }
 
-function clearLoginFailures(ip: string): void {
-  loginBuckets.delete(ip);
+function clearLoginFailures(key: string): void {
+  loginBuckets.delete(key);
 }
 
-/*
- * Periodic cleanup so the Map doesn't grow unbounded in
- * long-lived processes. Runs every 10 minutes.
- */
+/* Periodic cleanup so the Map doesn't grow unbounded. */
 if (typeof globalThis !== "undefined") {
   const g = globalThis as typeof globalThis & {
     __loginRateCleanup?: NodeJS.Timeout;
   };
 
   if (!g.__loginRateCleanup) {
-    g.__loginRateCleanup = setInterval(() => {
-      const now = Date.now();
-      for (const [key, bucket] of loginBuckets) {
-        if (bucket.resetAt < now) {
-          loginBuckets.delete(key);
+    g.__loginRateCleanup = setInterval(
+      () => {
+        const now = Date.now();
+        for (const [key, bucket] of loginBuckets) {
+          if (bucket.resetAt < now) {
+            loginBuckets.delete(key);
+          }
         }
-      }
-    }, 10 * 60 * 1000);
+      },
+      10 * 60 * 1000
+    );
 
     g.__loginRateCleanup.unref?.();
   }

@@ -8,6 +8,11 @@ import { getCurrentUser, verifyPassword } from "@/app/lib/auth";
 import { db } from "@/app/db";
 import { users, twoFactorRecoveryCodes } from "@/app/db/schema";
 import { createNotification } from "@/app/lib/notifications";
+import {
+  logAuditEvent,
+  getAuditIp,
+  getAuditUserAgent,
+} from "@/app/lib/audit-log";
 
 function hashCode(code: string) {
   return createHash("sha256").update(code).digest("hex");
@@ -24,6 +29,11 @@ export async function POST(request: Request) {
       { status: 401 }
     );
   }
+
+  /* ---------- Audit context ---------- */
+
+  const ip = getAuditIp(request) ?? "unknown";
+  const userAgent = getAuditUserAgent(request);
 
   /* ---------- Parse body ---------- */
 
@@ -47,6 +57,8 @@ export async function POST(request: Request) {
       id: users.id,
       passwordHash: users.passwordHash,
       twoFactorEnabledAt: users.twoFactorEnabledAt,
+      twoFactorMethod: users.twoFactorMethod,
+      twoFactorSecret: users.twoFactorSecret,
       twoFactorEmailCodeHash: users.twoFactorEmailCodeHash,
       twoFactorEmailCodeExpiresAt: users.twoFactorEmailCodeExpiresAt,
     })
@@ -67,6 +79,15 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+
+  /*
+   * Capture the method now, before the transaction nulls
+   * the column. The audit entry needs to record which
+   * method was disabled.
+   */
+  const previousMethod =
+    freshUser.twoFactorMethod ??
+    (freshUser.twoFactorSecret ? "totp" : "email");
 
   /* ---------- Verify password ---------- */
 
@@ -128,13 +149,28 @@ export async function POST(request: Request) {
       .where(eq(users.id, user.id));
   });
 
-  /* ---------- Notify: 2FA disabled ----------
+  /* ---------- Audit log ---------- */
+
+  /*
+   * Fire after the transaction commits.
    *
-   * Fires AFTER the transaction commits. If the transaction
-   * rolled back (DB error), we would never reach this line, so
-   * we never send a "2FA disabled" notification for a state
-   * change that didn't actually happen.
+   * Severity is "critical" — this is the single strongest
+   * signal of account takeover. An attacker with a stolen
+   * session who disables 2FA is doing it so they can log
+   * in from their own device next time. Getting an alert
+   * on this event catches the takeover within minutes
+   * instead of weeks later when the real user can't log in.
    */
+  await logAuditEvent({
+    userId: user.id,
+    eventType: "auth.2fa.disabled",
+    severity: "critical",
+    ipAddress: ip,
+    userAgent,
+    metadata: { method: previousMethod },
+  });
+
+  /* ---------- Notify: 2FA disabled ---------- */
 
   await createNotification({
     userId: user.id,

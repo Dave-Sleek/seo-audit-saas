@@ -8,6 +8,11 @@ import { db } from "@/app/db";
 import { users, twoFactorRecoveryCodes } from "@/app/db/schema";
 import { decrypt } from "@/app/lib/crypto";
 import { createNotification } from "@/app/lib/notifications";
+import {
+  logAuditEvent,
+  getAuditIp,
+  getAuditUserAgent,
+} from "@/app/lib/audit-log";
 
 const RECOVERY_CODE_COUNT = 10;
 
@@ -27,6 +32,11 @@ export async function POST(request: Request) {
     );
   }
 
+  /* ---------- Audit context ---------- */
+
+  const ip = getAuditIp(request) ?? "unknown";
+  const userAgent = getAuditUserAgent(request);
+
   /* ---------- Parse code ---------- */
 
   const body = await request.json().catch(() => null);
@@ -39,7 +49,7 @@ export async function POST(request: Request) {
     );
   }
 
-  /* ---------- Reload user to get the freshly-stored secret ---------- */
+  /* ---------- Reload user ---------- */
 
   const [freshUser] = await db
     .select({
@@ -65,7 +75,7 @@ export async function POST(request: Request) {
     );
   }
 
-  /* ---------- Verify the TOTP code ---------- */
+  /* ---------- Verify TOTP ---------- */
 
   const secret = decrypt(freshUser.twoFactorSecret);
 
@@ -98,12 +108,10 @@ export async function POST(request: Request) {
   /* ---------- Enable 2FA in a transaction ---------- */
 
   await db.transaction(async (tx) => {
-    // Wipe any old recovery codes (in case of re-enrollment).
     await tx
       .delete(twoFactorRecoveryCodes)
       .where(eq(twoFactorRecoveryCodes.userId, user.id));
 
-    // Store hashes of the new codes.
     await tx.insert(twoFactorRecoveryCodes).values(
       rawCodes.map((c) => ({
         userId: user.id,
@@ -111,7 +119,6 @@ export async function POST(request: Request) {
       }))
     );
 
-    // Enable TOTP 2FA.
     await tx
       .update(users)
       .set({
@@ -124,13 +131,26 @@ export async function POST(request: Request) {
       .where(eq(users.id, user.id));
   });
 
-  /* ---------- Notify: 2FA enabled ----------
+  /* ---------- Audit log ---------- */
+
+  /*
+   * Fire after the transaction commits. An audit entry is
+   * a statement about what actually happened; if the DB
+   * writes rolled back, we must not log a success.
    *
-   * Fires AFTER the transaction commits, so we never send a
-   * "2FA enabled" notification for a state change that rolled
-   * back. createNotification uses its own connection, not the
-   * (already closed) transaction.
+   * Severity is "info". Enabling 2FA strengthens the
+   * account, so it's a normal, positive event.
    */
+  await logAuditEvent({
+    userId: user.id,
+    eventType: "auth.2fa.enabled",
+    severity: "info",
+    ipAddress: ip,
+    userAgent,
+    metadata: { method: "totp" },
+  });
+
+  /* ---------- Notify: 2FA enabled ---------- */
 
   await createNotification({
     userId: user.id,

@@ -5,6 +5,11 @@ import { z } from "zod";
 import { db } from "@/app/db";
 import { users } from "@/app/db/schema";
 import { getCurrentUser } from "@/app/lib/auth";
+import {
+  logAuditEvent,
+  getAuditIp,
+  getAuditUserAgent,
+} from "@/app/lib/audit-log";
 
 /* =========================================================
    VALIDATION
@@ -39,6 +44,10 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
+    /* ---------- AUDIT CONTEXT ---------- */
+    const ip = getAuditIp(request) ?? "unknown";
+    const userAgent = getAuditUserAgent(request);
+
     /* ---------- VALIDATE ---------- */
     let body: unknown;
     try {
@@ -60,6 +69,28 @@ export async function PATCH(request: NextRequest) {
     }
 
     const { name, email } = parsed.data;
+
+    /* ---------- COMPUTE CHANGES ---------- */
+    /*
+     * Build the list of fields that actually changed. If the
+     * user submits the same values, we skip the DB write and
+     * the audit entry entirely.
+     */
+    const changedFields: string[] = [];
+
+    if (name !== user.name) changedFields.push("name");
+    if (email !== user.email) changedFields.push("email");
+
+    if (changedFields.length === 0) {
+      return NextResponse.json({
+        success: true,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+        },
+      });
+    }
 
     /* ---------- EMAIL UNIQUENESS ---------- */
     if (email !== user.email) {
@@ -94,6 +125,34 @@ export async function PATCH(request: NextRequest) {
         { status: 500 }
       );
     }
+
+    /* ---------- AUDIT LOG ---------- */
+    /*
+     * Fire after the DB write. If the update rolled back, we
+     * must not log a change that didn't happen.
+     *
+     * Email changes are logged at "warning" severity, name-only
+     * changes at "info". Changing the email address is a
+     * precursor to account takeover — the attacker
+     * redirects password-reset emails to an inbox they
+     * control. Name changes are cosmetic.
+     */
+    const emailChanged = changedFields.includes("email");
+
+    await logAuditEvent({
+      userId: user.id,
+      eventType: "account.profile_updated",
+      severity: emailChanged ? "warning" : "info",
+      ipAddress: ip,
+      userAgent,
+      metadata: {
+        changedFields,
+        previousName: user.name,
+        previousEmail: user.email,
+        newName: updated.name,
+        newEmail: updated.email,
+      },
+    });
 
     return NextResponse.json({
       success: true,

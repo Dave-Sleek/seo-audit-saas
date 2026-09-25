@@ -1,7 +1,9 @@
-import Link from "next/link";
+// app/dashboard/admin/layout.tsx
+
 import { redirect } from "next/navigation";
 
 import { getAdminUser } from "@/app/lib/admin";
+import AdminNavLink from "./admin-nav-link";
 
 export default async function AdminLayout({
   children,
@@ -30,27 +32,11 @@ export default async function AdminLayout({
         <AdminNavLink href="/dashboard/admin/plans">Plans</AdminNavLink>
         <AdminNavLink href="/dashboard/admin/users">Users</AdminNavLink>
         <AdminNavLink href="/dashboard/admin/payments">Payments</AdminNavLink>
+        <AdminNavLink href="/dashboard/admin/audit-log">Audit log</AdminNavLink>
+        <AdminNavLink href="/dashboard/admin/support">Support</AdminNavLink>
       </div>
 
       {children}
     </div>
-  );
-}
-
-function AdminNavLink({
-  href,
-  children,
-}: {
-  href: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Link
-      href={href}
-      className="rounded-lg px-3.5 py-2 text-sm font-medium transition-colors hover:bg-slate-50"
-      style={{ color: "var(--text-secondary)" }}
-    >
-      {children}
-    </Link>
   );
 }

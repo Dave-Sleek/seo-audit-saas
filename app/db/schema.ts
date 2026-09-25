@@ -927,3 +927,146 @@ export const emailVerificationTokens = pgTable(
     ),
   ]
 );
+
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    /*
+     * No FK constraints on these. The audit log is a
+     * historical record — it must survive user deletions.
+     * Store the UUID as a plain column.
+     */
+    userId: uuid("user_id"),
+    actorId: uuid("actor_id"),
+
+    eventType: varchar("event_type", { length: 60 }).notNull(),
+    severity: varchar("severity", { length: 20 })
+      .notNull()
+      .default("info"),
+
+    ipAddress: varchar("ip_address", { length: 45 }),
+    userAgent: text("user_agent"),
+
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("audit_log_user_id_created_at_idx").on(
+      table.userId,
+      table.createdAt
+    ),
+    index("audit_log_actor_id_created_at_idx").on(
+      table.actorId,
+      table.createdAt
+    ),
+    index("audit_log_event_type_created_at_idx").on(
+      table.eventType,
+      table.createdAt
+    ),
+  ]
+);
+
+
+// app/db/schema.ts — add these tables
+
+export const supportTickets = pgTable(
+  "support_tickets",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+
+    /*
+     * Short human-readable reference ("TKT-7F3A"). Unique across
+     * the table so it can be quoted in emails or support chats.
+     */
+    reference: varchar("reference", { length: 20 })
+      .notNull()
+      .unique(),
+
+    subject: varchar("subject", { length: 200 }).notNull(),
+
+    /*
+     * Constrained to a known set by the form, but stored as
+     * varchar so we can add categories without a migration.
+     */
+    category: varchar("category", { length: 50 })
+      .notNull()
+      .default("other"),
+
+    status: varchar("status", { length: 30 })
+      .notNull()
+      .default("open"),
+
+    priority: varchar("priority", { length: 20 })
+      .notNull()
+      .default("normal"),
+
+    body: text("body").notNull(),
+
+    lastReplyAt: timestamp("last_reply_at", {
+      withTimezone: true,
+    }),
+
+    resolvedAt: timestamp("resolved_at", {
+      withTimezone: true,
+    }),
+
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("support_tickets_user_id_idx").on(table.userId),
+    index("support_tickets_status_idx").on(table.status),
+    index("support_tickets_created_at_idx").on(table.createdAt),
+  ]
+);
+
+export const supportTicketReplies = pgTable(
+  "support_ticket_replies",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    ticketId: uuid("ticket_id")
+      .notNull()
+      .references(() => supportTickets.id, {
+        onDelete: "cascade",
+      }),
+
+    authorId: uuid("author_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+
+    /*
+     * "user" or "admin". Determines display treatment and whether
+     * the reply counts as an official response.
+     */
+    authorRole: varchar("author_role", { length: 20 })
+      .notNull()
+      .default("user"),
+
+    body: text("body").notNull(),
+
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("support_ticket_replies_ticket_id_idx").on(table.ticketId),
+  ]
+);

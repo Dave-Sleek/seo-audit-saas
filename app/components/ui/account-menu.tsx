@@ -221,6 +221,26 @@ export default function AccountMenu({
                 <i className="bi bi-gear w-5 text-center text-slate-500" />
                 <span>Settings</span>
               </Link>
+
+              <Link
+                  href="/dashboard/settings/activity"
+                  onClick={() => setOpen(false)}
+                  className={itemClass}
+                  role="menuitem"
+                >
+                  <i className="bi bi-clock-history w-5 text-center text-slate-500" />
+                  <span>Recent activity </span>
+              </Link>
+
+              <Link
+                  href="/dashboard/support"
+                  onClick={() => setOpen(false)}
+                  className={itemClass}
+                  role="menuitem"
+                >
+                  <i className="bi bi-question-circle w-5 text-center text-slate-500" />
+                  <span>Support </span>
+              </Link>
             </div>
 
             {/* Logout */}

@@ -1020,3 +1020,24 @@ export async function cancelSubscription(userId: string) {
 
   return updatedSubscription ?? null;
 }
+
+/* =========================================================
+   PUBLIC — PAID SUBSCRIBER CHECK
+========================================================= */
+
+/**
+ * Returns true if the user has an active subscription on a
+ * plan that costs more than 0. Free-plan users return false,
+ * even though they technically have an "active" subscription.
+ *
+ * Used to gate paid-only features like PDF export.
+ */
+export async function isPaidSubscriber(
+  userId: string
+): Promise<boolean> {
+  const plan = await getCurrentPlan(userId);
+
+  if (!plan) return false;
+
+  return Number(plan.price) > 0;
+}

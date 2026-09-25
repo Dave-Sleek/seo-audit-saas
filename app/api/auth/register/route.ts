@@ -7,6 +7,11 @@ import {
   sendVerificationEmail,
   sendWelcomeEmail,
 } from "@/app/lib/email/send";
+import {
+  logAuditEvent,
+  getAuditIp,
+  getAuditUserAgent,
+} from "@/app/lib/audit-log";
 
 import { db } from "@/app/db";
 import {
@@ -19,8 +24,18 @@ import {
   hashPassword,
 } from "@/app/lib/auth";
 
+/* =========================================================
+   EMAIL VALIDATION
+========================================================= */
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export async function POST(request: Request) {
   try {
+    /* -----------------------------------------------------
+       PARSE BODY
+    ----------------------------------------------------- */
+
     const body = await request.json();
 
     const name =
@@ -34,7 +49,49 @@ export async function POST(request: Request) {
     const password =
       typeof body.password === "string" ? body.password : "";
 
-    /* ---------- Validation ---------- */
+    /* -----------------------------------------------------
+       AUDIT CONTEXT
+    ----------------------------------------------------- */
+
+    const ip = getAuditIp(request) ?? "unknown";
+    const userAgent = getAuditUserAgent(request);
+
+    /* -----------------------------------------------------
+       RATE LIMIT
+    ----------------------------------------------------- */
+
+    /*
+     * Signups from one IP should be rare. Three per hour is
+     * generous for a real person (typos, multiple accounts
+     * for testing) but tight enough to block scripted mass
+     * account creation.
+     *
+     * Keyed by IP only — there's no email yet at this point,
+     * and a fresh email per attempt would defeat an
+     * email-keyed bucket anyway.
+     */
+    const limit = checkRegisterRateLimit(`ip:${ip}`);
+
+    if (!limit.allowed) {
+      return NextResponse.json(
+        {
+          error:
+            "Too many signup attempts. Please try again later.",
+        },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(
+              Math.ceil(limit.retryAfterMs / 1000)
+            ),
+          },
+        }
+      );
+    }
+
+    /* -----------------------------------------------------
+       VALIDATION
+    ----------------------------------------------------- */
 
     if (!name) {
       return NextResponse.json(
@@ -43,7 +100,7 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!email || !email.includes("@")) {
+    if (!EMAIL_RE.test(email)) {
       return NextResponse.json(
         { error: "Please enter a valid email address." },
         { status: 400 }
@@ -57,7 +114,9 @@ export async function POST(request: Request) {
       );
     }
 
-    /* ---------- Check for existing account ---------- */
+    /* -----------------------------------------------------
+       CHECK FOR EXISTING ACCOUNT
+    ----------------------------------------------------- */
 
     const existingUser = await db
       .select({ id: users.id })
@@ -72,7 +131,9 @@ export async function POST(request: Request) {
       );
     }
 
-    /* ---------- Create user ---------- */
+    /* -----------------------------------------------------
+       CREATE USER
+    ----------------------------------------------------- */
 
     const passwordHash = await hashPassword(password);
 
@@ -93,18 +154,50 @@ export async function POST(request: Request) {
       throw new Error("User insert returned no row.");
     }
 
-    /* ---------- Create session ---------- */
+    /* -----------------------------------------------------
+       AUDIT LOG — ACCOUNT CREATED
+    ----------------------------------------------------- */
+
+    /*
+     * Log immediately after the insert, before the session
+     * is created. If any of the downstream steps fail
+     * (verification email, free subscription), the account
+     * still exists and the audit entry must reflect that.
+     */
+    await logAuditEvent({
+      userId: user.id,
+      eventType: "account.registered",
+      severity: "info",
+      ipAddress: ip,
+      userAgent,
+      metadata: {
+        email: user.email,
+        name: user.name,
+      },
+    });
+
+    /* -----------------------------------------------------
+       RECORD THE ATTEMPT
+    ----------------------------------------------------- */
+
+    /*
+     * Only count the attempt once the user is actually
+     * created. Failed validation, duplicate emails, and
+     * thrown errors don't consume the quota — a legitimate
+     * user retrying after a typo shouldn't burn an attempt.
+     */
+    recordRegisterAttempt(`ip:${ip}`);
+
+    /* -----------------------------------------------------
+       CREATE SESSION
+    ----------------------------------------------------- */
 
     await createSession(user.id);
 
-    /* ---------- Send verification email ----------
-     *
-     * Generates a single-use verification token, stores
-     * its hash, and sends the raw token in the email link.
-     *
-     * Failures are logged but do not fail signup — the
-     * user can request a new link from /verify-email.
-     */
+    /* -----------------------------------------------------
+       SEND VERIFICATION EMAIL
+    ----------------------------------------------------- */
+
     try {
       const rawToken = randomBytes(32).toString("hex");
       const tokenHash = createHash("sha256")
@@ -132,18 +225,10 @@ export async function POST(request: Request) {
       );
     }
 
-    /* ---------- Grant Free subscription ----------
-     *
-     * Every new account starts on the Free plan. This
-     * creates a subscription row + first usage period so
-     * the user's dashboard shows their quota immediately
-     * instead of "no subscription."
-     *
-     * Failures are logged but do not fail signup. If this
-     * throws, the lazy grant path in expireUserSubscriptions
-     * will retry on the user's next page load — they'll
-     * still end up on Free, just a few seconds later.
-     */
+    /* -----------------------------------------------------
+       GRANT FREE SUBSCRIPTION
+    ----------------------------------------------------- */
+
     try {
       await grantFreeSubscription(user.id);
     } catch (freeError) {
@@ -153,12 +238,10 @@ export async function POST(request: Request) {
       );
     }
 
-    /* ---------- Send welcome email (non-blocking) ----------
-     *
-     * Fires AFTER the user and session are committed.
-     * Failures are logged but never propagate — a broken
-     * email provider must not fail a signup.
-     */
+    /* -----------------------------------------------------
+       SEND WELCOME EMAIL
+    ----------------------------------------------------- */
+
     try {
       await sendWelcomeEmail({
         to: user.email,
@@ -182,5 +265,88 @@ export async function POST(request: Request) {
       { error: "Unable to create your account." },
       { status: 500 }
     );
+  }
+}
+
+/* =========================================================
+   RATE LIMITING
+========================================================= */
+
+/*
+ * In-memory rate limiter for registration. Keyed by IP.
+ *
+ * 3 signups per hour per IP. Beyond that, the request is
+ * rejected with a Retry-After header.
+ *
+ * On serverless or multi-instance deployments, replace with
+ * Redis, Upstash, or a Postgres-backed counter.
+ */
+
+const REGISTER_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const REGISTER_MAX_ATTEMPTS = 3;
+
+type RegisterBucket = {
+  attempts: number;
+  resetAt: number;
+};
+
+const registerBuckets = new Map<string, RegisterBucket>();
+
+function checkRegisterRateLimit(key: string): {
+  allowed: boolean;
+  retryAfterMs: number;
+} {
+  const now = Date.now();
+  const bucket = registerBuckets.get(key);
+
+  if (!bucket || bucket.resetAt < now) {
+    return { allowed: true, retryAfterMs: 0 };
+  }
+
+  if (bucket.attempts >= REGISTER_MAX_ATTEMPTS) {
+    return {
+      allowed: false,
+      retryAfterMs: bucket.resetAt - now,
+    };
+  }
+
+  return { allowed: true, retryAfterMs: 0 };
+}
+
+function recordRegisterAttempt(key: string): void {
+  const now = Date.now();
+  const bucket = registerBuckets.get(key);
+
+  if (!bucket || bucket.resetAt < now) {
+    registerBuckets.set(key, {
+      attempts: 1,
+      resetAt: now + REGISTER_WINDOW_MS,
+    });
+    return;
+  }
+
+  bucket.attempts += 1;
+}
+
+/* Periodic cleanup so the Map doesn't grow unbounded. */
+if (typeof globalThis !== "undefined") {
+  const g = globalThis as typeof globalThis & {
+    __registerRateCleanup?: NodeJS.Timeout;
+  };
+
+  if (!g.__registerRateCleanup) {
+    g.__registerRateCleanup = setInterval(
+      () => {
+        const now = Date.now();
+        for (const [key, bucket] of registerBuckets) {
+          if (bucket.resetAt < now) {
+            registerBuckets.delete(key);
+          }
+        }
+      },
+      10 * 60 * 1000
+    );
+
+    g.__registerRateCleanup.unref?.();
   }
 }

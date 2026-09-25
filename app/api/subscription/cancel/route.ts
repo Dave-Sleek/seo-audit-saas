@@ -8,8 +8,13 @@ import { db } from "@/app/db";
 import { subscriptions } from "@/app/db/schema";
 import { ACTIVE_SUBSCRIPTION_STATUSES } from "@/app/lib/subscription";
 import { disablePaystackSubscription } from "@/app/lib/paystack";
+import {
+  logAuditEvent,
+  getAuditIp,
+  getAuditUserAgent,
+} from "@/app/lib/audit-log";
 
-export async function POST() {
+export async function POST(request: Request) {
   const user = await getCurrentUser();
 
   if (!user) {
@@ -18,6 +23,11 @@ export async function POST() {
       { status: 401 }
     );
   }
+
+  /* ---------- Audit context ---------- */
+
+  const ip = getAuditIp(request) ?? "unknown";
+  const userAgent = getAuditUserAgent(request);
 
   /* ---------- Find the current active subscription ---------- */
 
@@ -101,14 +111,41 @@ export async function POST() {
 
   /* ---------- Mark as non-renewing ---------- */
 
+  const cancelledAt = new Date();
+
   await db
     .update(subscriptions)
     .set({
       status: "non_renewing",
-      cancelledAt: new Date(),
-      updatedAt: new Date(),
+      cancelledAt,
+      updatedAt: cancelledAt,
     })
     .where(eq(subscriptions.id, subscription.id));
+
+  /* ---------- Audit log ---------- */
+
+  /*
+   * Fire after the DB write. The subscription is now in
+   * non_renewing state; if the update had failed, we must
+   * not log a cancellation.
+   *
+   * Severity is "info" — cancellations are a normal
+   * business event, not a security signal. Higher severity
+   * would flood the critical tier with routine churn.
+   */
+  await logAuditEvent({
+    userId: user.id,
+    eventType: "billing.subscription.cancelled",
+    severity: "info",
+    ipAddress: ip,
+    userAgent,
+    metadata: {
+      subscriptionId: subscription.id,
+      planId: subscription.planId,
+      accessEndsAt: subscription.endsAt.toISOString(),
+      cancelledAt: cancelledAt.toISOString(),
+    },
+  });
 
   return NextResponse.json({
     success: true,

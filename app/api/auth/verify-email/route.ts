@@ -9,6 +9,11 @@ import {
   users,
   emailVerificationTokens,
 } from "@/app/db/schema";
+import {
+  logAuditEvent,
+  getAuditIp,
+  getAuditUserAgent,
+} from "@/app/lib/audit-log";
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -26,6 +31,11 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+
+  /* ---------- Audit context ---------- */
+
+  const ip = getAuditIp(request) ?? "unknown";
+  const userAgent = getAuditUserAgent(request);
 
   const now = new Date();
   const tokenHash = hashToken(token);
@@ -89,6 +99,25 @@ export async function POST(request: Request) {
         updatedAt: now,
       })
       .where(eq(users.id, row.userId));
+  });
+
+  /* ---------- Audit log ---------- */
+
+  /*
+   * Fire after the transaction commits. The audit entry
+   * is a statement about what actually happened — if the
+   * DB writes rolled back, we must not log a success.
+   *
+   * Severity is "info". Email verification is a normal
+   * step in a new account's lifecycle, not a security
+   * event.
+   */
+  await logAuditEvent({
+    userId: row.userId,
+    eventType: "auth.email_verified",
+    severity: "info",
+    ipAddress: ip,
+    userAgent,
   });
 
   console.log("[verify-email] verified", { userId: row.userId });

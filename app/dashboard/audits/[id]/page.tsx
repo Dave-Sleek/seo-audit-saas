@@ -1,6 +1,9 @@
+// app/dashboard/audits/[id]/page.tsx
+
 import { redirect } from "next/navigation";
 
 import { getCurrentUser } from "@/app/lib/auth";
+import { isPaidSubscriber } from "@/app/lib/subscription";
 import AuditReportClient from "./audit-report-client";
 
 export default async function AuditReportPage({
@@ -16,8 +19,7 @@ export default async function AuditReportPage({
 
   const { id } = await params;
 
-  return (
-    <AuditReportClient auditId={id} />
-  );
-}
+  const canExport = await isPaidSubscriber(user.id);
 
+  return <AuditReportClient auditId={id} canExport={canExport} />;
+}

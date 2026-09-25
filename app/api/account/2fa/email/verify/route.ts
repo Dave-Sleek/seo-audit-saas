@@ -7,6 +7,11 @@ import { randomBytes, createHash } from "crypto";
 import { getCurrentUser } from "@/app/lib/auth";
 import { db } from "@/app/db";
 import { users, twoFactorRecoveryCodes } from "@/app/db/schema";
+import {
+  logAuditEvent,
+  getAuditIp,
+  getAuditUserAgent,
+} from "@/app/lib/audit-log";
 
 const RECOVERY_CODE_COUNT = 10;
 
@@ -25,6 +30,11 @@ export async function POST(request: Request) {
       { status: 401 }
     );
   }
+
+  /* ---------- Audit context ---------- */
+
+  const ip = getAuditIp(request) ?? "unknown";
+  const userAgent = getAuditUserAgent(request);
 
   /* ---------- Parse code ---------- */
 
@@ -104,8 +114,19 @@ export async function POST(request: Request) {
       }))
     );
 
-
-      await tx
+    /*
+     * Enable email-based 2FA.
+     *
+     * - twoFactorMethod = "email" so the login route picks
+     *   the email OTP path.
+     * - twoFactorSecret = null to clear any stale TOTP secret
+     *   from an abandoned enrollment. Otherwise the login
+     *   route's fallback inference (secret present → totp)
+     *   could pick TOTP even though the user chose email.
+     * - Clear the email code hash and expiry; the code has
+     *   just been consumed.
+     */
+    await tx
       .update(users)
       .set({
         twoFactorEnabledAt: new Date(),
@@ -116,17 +137,25 @@ export async function POST(request: Request) {
         updatedAt: new Date(),
       })
       .where(eq(users.id, user.id));
+  });
 
-    // await tx
-    //   .update(users)
-    //   .set({
-    //     twoFactorEnabledAt: new Date(),
-    //     twoFactorMethod: "email",
-    //     twoFactorEmailCodeHash: null,
-    //     twoFactorEmailCodeExpiresAt: null,
-    //     updatedAt: new Date(),
-    //   })
-    //   .where(eq(users.id, user.id));
+  /* ---------- Audit log ---------- */
+
+  /*
+   * Fire after the transaction commits. An audit entry is
+   * a statement about what actually happened; if the DB
+   * writes rolled back, we must not log a success.
+   *
+   * Severity is "info" — enabling 2FA strengthens the
+   * account.
+   */
+  await logAuditEvent({
+    userId: user.id,
+    eventType: "auth.2fa.enabled",
+    severity: "info",
+    ipAddress: ip,
+    userAgent,
+    metadata: { method: "email" },
   });
 
   return NextResponse.json({
