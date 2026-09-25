@@ -1,5 +1,7 @@
 
 
+import type { CSSProperties } from "react";
+
 interface TicketAdminNotifyEmailProps {
   reference: string;
   subject: string;
