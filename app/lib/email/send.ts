@@ -8,6 +8,7 @@ import { VerifyEmail } from "./templates/verify-email";
 import { TicketCreatedEmail } from "./templates/support-ticket-created";
 import { TicketAdminNotifyEmail } from "./templates/support-ticket-admin-notify";
 import { TicketReplyEmail } from "./templates/support-ticket-reply";
+import { ProjectInviteEmail } from "./templates/project-invite";
 
 /* =========================================================
    LOGGING HELPERS
@@ -443,6 +444,65 @@ export async function sendTicketReplyEmail(params: {
   } catch (err) {
     logSendFailure(
       "ticket-reply send (threw)",
+      { to: params.to, subject: emailSubject },
+      err
+    );
+    return false;
+  }
+}
+
+
+/* =========================================================
+   PROJECT INVITE
+========================================================= */
+
+export async function sendProjectInviteEmail(params: {
+  to: string;
+  inviterName: string | null;
+  projectName: string;
+  projectDomain: string;
+  token: string;
+}): Promise<boolean> {
+  if (!resend) {
+    console.warn(
+      "[email] sendProjectInviteEmail skipped: Resend not configured"
+    );
+    return false;
+  }
+
+  const inviteUrl = `${APP_URL}/dashboard/invitations/${params.token}`;
+  const emailSubject = `You've been invited to ${params.projectName}`;
+
+  try {
+    const { data, error } = await resend.emails.send({
+      from: FROM_EMAIL,
+      to: params.to,
+      subject: emailSubject,
+      react: ProjectInviteEmail({
+        inviterName: params.inviterName,
+        projectName: params.projectName,
+        projectDomain: params.projectDomain,
+        inviteUrl,
+      }),
+    });
+
+    if (error) {
+      logSendFailure(
+        "project-invite send",
+        { to: params.to, subject: emailSubject },
+        error
+      );
+      return false;
+    }
+
+    console.log("[email] project-invite sent", {
+      to: params.to,
+      id: data?.id,
+    });
+    return true;
+  } catch (err) {
+    logSendFailure(
+      "project-invite send (threw)",
       { to: params.to, subject: emailSubject },
       err
     );

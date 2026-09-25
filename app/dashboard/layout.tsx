@@ -1,3 +1,5 @@
+// app/dashboard/layout.tsx
+
 import Link from "next/link";
 
 import AccountMenu from "@/app/components/ui/account-menu";
@@ -13,12 +15,6 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  /*
-   * This is the single gate for the entire /dashboard/*
-   * tree. requireVerifiedUser() redirects unauthenticated
-   * users to /login and unverified users to /verify-email,
-   * so nothing below this line needs its own check.
-   */
   const user = await requireVerifiedUser();
 
   return (
@@ -51,6 +47,11 @@ export default async function DashboardLayout({
             Projects
           </NavLink>
 
+          {/* 👇 NEW */}
+          <NavLink href="/dashboard/team" icon={<TeamIcon />}>
+            Team
+          </NavLink>
+
           <NavLink href="/dashboard/audits" icon={<SearchIcon />}>
             Audits
           </NavLink>
@@ -66,9 +67,11 @@ export default async function DashboardLayout({
           <NavLink href="/dashboard/settings" icon={<SettingsIcon />}>
             Settings
           </NavLink>
+
           <NavLink href="/dashboard/settings/activity" icon={<ActivityIcon />}>
             Recent activity
           </NavLink>
+
           <NavLink href="/dashboard/support" icon={<HelpIcon />}>
             Support
           </NavLink>
@@ -104,7 +107,6 @@ export default async function DashboardLayout({
       <div className="app-main flex min-w-0 flex-1 flex-col">
         {/* ---------- HEADER ---------- */}
         <header className="dashboard-header">
-          {/* Left: mobile brand */}
           <div className="flex items-center gap-3">
             <Link
               href="/dashboard"
@@ -115,7 +117,6 @@ export default async function DashboardLayout({
             </Link>
           </div>
 
-          {/* Right: account menu */}
           <AccountMenu
             user={{
               name: user.name ?? null,
@@ -195,6 +196,26 @@ function FolderIcon() {
   );
 }
 
+function TeamIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
 function SearchIcon() {
   return (
     <svg
@@ -267,7 +288,6 @@ function SettingsIcon() {
   );
 }
 
-// Lucide "rotate-cw" — clockwise circular arrow
 function ActivityIcon() {
   return (
     <svg

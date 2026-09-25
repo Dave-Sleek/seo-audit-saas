@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { and, asc, desc, eq } from "drizzle-orm";
+import { getProjectAccess } from "@/app/lib/project-access";
 
 import { db } from "@/app/db";
 import {
@@ -26,6 +27,23 @@ export async function GET(
       );
     }
 
+    // const [result] = await db
+    //   .select({
+    //     audit: audits,
+    //     project: projects,
+    //   })
+    //   .from(audits)
+    //   .innerJoin(projects, eq(audits.projectId, projects.id))
+    //   .where(
+    //     and(
+    //       eq(audits.id, id),
+    //       eq(projects.userId, user.id)
+    //     )
+    //   )
+    //   .limit(1);
+
+          /* ---------- Load audit + project (no ownership filter) ---------- */
+
     const [result] = await db
       .select({
         audit: audits,
@@ -33,13 +51,26 @@ export async function GET(
       })
       .from(audits)
       .innerJoin(projects, eq(audits.projectId, projects.id))
-      .where(
-        and(
-          eq(audits.id, id),
-          eq(projects.userId, user.id)
-        )
-      )
+      .where(eq(audits.id, id))
       .limit(1);
+
+    if (!result) {
+      return NextResponse.json(
+        { error: "Audit not found." },
+        { status: 404 }
+      );
+    }
+
+    /* ---------- Access check: owner OR accepted collaborator ---------- */
+
+    const access = await getProjectAccess(user.id, result.project.id);
+
+    if (!access) {
+      return NextResponse.json(
+        { error: "Audit not found." },
+        { status: 404 }
+      );
+    }
 
     if (!result) {
       return NextResponse.json(

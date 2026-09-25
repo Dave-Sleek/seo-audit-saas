@@ -1070,3 +1070,60 @@ export const supportTicketReplies = pgTable(
     index("support_ticket_replies_ticket_id_idx").on(table.ticketId),
   ]
 );
+
+/* =========================================================
+   PROJECT COLLABORATORS
+========================================================= */
+
+export const projectCollaborators = pgTable(
+  "project_collaborators",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+
+    /**
+     * Set once the invitee has an account and accepts.
+     * Null while the invitation is pending.
+     */
+    userId: uuid("user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
+
+    invitedEmail: varchar("invited_email", { length: 320 }).notNull(),
+
+    invitedBy: uuid("invited_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+
+    token: varchar("token", { length: 64 }).notNull().unique(),
+
+    status: varchar("status", { length: 20 })
+      .notNull()
+      .default("pending"),
+
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+  },
+  (table) => ({
+    projectEmailUnique: uniqueIndex(
+      "project_collaborators_project_email_unique"
+    ).on(table.projectId, table.invitedEmail),
+
+    projectIdx: index("project_collaborators_project_id_idx").on(
+      table.projectId
+    ),
+
+    userIdx: index("project_collaborators_user_id_idx").on(
+      table.userId
+    ),
+  })
+);
+
+export type ProjectCollaborator =
+  typeof projectCollaborators.$inferSelect;

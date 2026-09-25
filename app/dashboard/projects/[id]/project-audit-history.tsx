@@ -40,19 +40,15 @@ function scoreBadgeClass(score: number | null) {
   if (score === null) {
     return "bg-slate-100 text-slate-600 border-slate-200";
   }
-
   if (score >= 90) {
     return "bg-emerald-50 text-emerald-700 border-emerald-100";
   }
-
   if (score >= 75) {
     return "bg-indigo-50 text-indigo-700 border-indigo-100";
   }
-
   if (score >= 60) {
     return "bg-amber-50 text-amber-700 border-amber-100";
   }
-
   return "bg-red-50 text-red-700 border-red-100";
 }
 
@@ -94,27 +90,28 @@ function formatDate(value: string | null) {
 
 function formatChange(value: number | null) {
   if (value === null) return "—";
-
   return `${value >= 0 ? "+" : ""}${value}`;
 }
 
 function getChangeClass(value: number | null) {
   if (value === null) return "text-slate-400";
-
   if (value > 0) return "text-emerald-600";
   if (value < 0) return "text-red-600";
-
   return "text-slate-500";
 }
 
 export default function ProjectAuditHistory({
   projectId,
+  role,
 }: {
   projectId: string;
+  role: "owner" | "collaborator";
 }) {
   const [data, setData] = useState<HistoryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const isOwner = role === "owner";
 
   useEffect(() => {
     async function loadHistory() {
@@ -124,9 +121,7 @@ export default function ProjectAuditHistory({
 
         const response = await fetch(
           `/api/projects/${projectId}/audit-history`,
-          {
-            cache: "no-store",
-          }
+          { cache: "no-store" }
         );
 
         const result = await response.json();
@@ -152,9 +147,7 @@ export default function ProjectAuditHistory({
     loadHistory();
   }, [projectId]);
 
-  /* =========================================================
-     Loading
-     ========================================================= */
+  /* ---------- Loading ---------- */
 
   if (loading) {
     return (
@@ -165,7 +158,6 @@ export default function ProjectAuditHistory({
             role="status"
             aria-label="Loading"
           />
-
           <span className="text-sm text-slate-600">
             Loading audit history...
           </span>
@@ -174,20 +166,16 @@ export default function ProjectAuditHistory({
     );
   }
 
-  /* =========================================================
-     Error
-     ========================================================= */
+  /* ---------- Error ---------- */
 
   if (error || !data) {
     return (
       <div className="stripe-alert stripe-alert-danger">
         <i className="bi bi-exclamation-circle text-base" />
-
         <div>
           <div className="font-semibold">
             Unable to load audit history
           </div>
-
           <div className="mt-1">
             {error || "Unable to load history."}
           </div>
@@ -197,53 +185,32 @@ export default function ProjectAuditHistory({
   }
 
   const latestAudit = data.history[0] ?? null;
-
   const totalAudits = data.history.length;
-
   const latestScore = latestAudit?.score ?? null;
-
   const latestPages = latestAudit?.pagesCrawled ?? 0;
-
   const latestStatus = latestAudit?.status ?? null;
-
-  /* =========================================================
-     Main
-     ========================================================= */
 
   return (
     <div className="space-y-6">
       {/* =====================================================
           Header
-          ===================================================== */}
+      ===================================================== */}
 
       <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          {/* Breadcrumbs */}
-
-          <nav
-            className="breadcrumbs mb-4"
-            aria-label="Breadcrumb"
-          >
+          <nav className="breadcrumbs mb-4" aria-label="Breadcrumb">
             <Link href="/dashboard">Dashboard</Link>
-
             <span className="breadcrumb-separator">
               <i className="bi bi-chevron-right text-[10px]" />
             </span>
-
             <span>Project</span>
-
             <span className="breadcrumb-separator">
               <i className="bi bi-chevron-right text-[10px]" />
             </span>
-
-            <span className="text-slate-900">
-              Audit history
-            </span>
+            <span className="text-slate-900">Audit history</span>
           </nav>
 
-          {/* Project identity */}
-
-          <div className="mb-2 flex items-center gap-2">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
             <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
               <i className="bi bi-globe2 text-sm" />
             </span>
@@ -251,6 +218,13 @@ export default function ProjectAuditHistory({
             <span className="domain-text">
               {data.project.domain}
             </span>
+
+            {/* 👇 NEW: shared-with-you badge for collaborators */}
+            {!isOwner && (
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                Shared with you · View only
+              </span>
+            )}
           </div>
 
           <h2 className="page-title">Audit history</h2>
@@ -264,103 +238,77 @@ export default function ProjectAuditHistory({
           </p>
         </div>
 
-        <Link
-          href="/dashboard"
-          className="btn-stripe btn-stripe-secondary self-start lg:self-auto"
-        >
-          <i className="bi bi-arrow-left" />
-          <span>Dashboard</span>
-        </Link>
+        <div className="flex flex-wrap gap-2 self-start lg:self-auto">
+          {/* 👇 NEW: Team settings link — owner only */}
+          {isOwner && (
+            <Link
+              href={`/dashboard/projects/${projectId}/settings/team`}
+              className="btn-stripe btn-stripe-secondary"
+            >
+              <i className="bi bi-people" />
+              <span>Team</span>
+            </Link>
+          )}
+
+          <Link
+            href="/dashboard"
+            className="btn-stripe btn-stripe-secondary"
+          >
+            <i className="bi bi-arrow-left" />
+            <span>Dashboard</span>
+          </Link>
+        </div>
       </div>
 
       {/* =====================================================
           Summary Metrics
-          ===================================================== */}
+      ===================================================== */}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {/* Total audits */}
-
         <div className="metric-card">
           <div className="flex items-center justify-between">
-            <span className="metric-label">
-              Total audits
-            </span>
-
+            <span className="metric-label">Total audits</span>
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-50 text-slate-500">
               <i className="bi bi-clock-history" />
             </span>
           </div>
-
-          <div className="metric-value">
-            {totalAudits}
-          </div>
-
-          <div className="metric-description">
-            Audit runs recorded
-          </div>
+          <div className="metric-value">{totalAudits}</div>
+          <div className="metric-description">Audit runs recorded</div>
         </div>
-
-        {/* Latest score */}
 
         <div className="metric-card">
           <div className="flex items-center justify-between">
-            <span className="metric-label">
-              Latest score
-            </span>
-
+            <span className="metric-label">Latest score</span>
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
               <i className="bi bi-speedometer2" />
             </span>
           </div>
-
-          <div
-            className={`metric-value ${scoreClass(
-              latestScore
-            )}`}
-          >
+          <div className={`metric-value ${scoreClass(latestScore)}`}>
             {latestScore ?? "—"}
           </div>
-
           <div className="metric-description">
             {scoreLabel(latestScore)}
           </div>
         </div>
 
-        {/* Pages analyzed */}
-
         <div className="metric-card">
           <div className="flex items-center justify-between">
-            <span className="metric-label">
-              Pages analyzed
-            </span>
-
+            <span className="metric-label">Pages analyzed</span>
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-50 text-slate-500">
               <i className="bi bi-file-earmark-text" />
             </span>
           </div>
-
-          <div className="metric-value">
-            {latestPages}
-          </div>
-
-          <div className="metric-description">
-            From the latest audit
-          </div>
+          <div className="metric-value">{latestPages}</div>
+          <div className="metric-description">From the latest audit</div>
         </div>
-
-        {/* Latest status */}
 
         <div className="metric-card">
           <div className="flex items-center justify-between">
-            <span className="metric-label">
-              Latest status
-            </span>
-
+            <span className="metric-label">Latest status</span>
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-50 text-slate-500">
               <i className="bi bi-activity" />
             </span>
           </div>
-
           <div className="mt-3">
             {latestStatus ? (
               <span
@@ -370,109 +318,71 @@ export default function ProjectAuditHistory({
               >
                 <span
                   className={`h-1.5 w-1.5 rounded-full ${
-                    latestStatus.toLowerCase() ===
-                      "completed" ||
-                    latestStatus.toLowerCase() ===
-                      "complete"
+                    latestStatus.toLowerCase() === "completed" ||
+                    latestStatus.toLowerCase() === "complete"
                       ? "bg-emerald-500"
-                      : latestStatus.toLowerCase() ===
-                          "failed" ||
-                        latestStatus.toLowerCase() ===
-                          "error"
-                      ? "bg-red-500"
-                      : "bg-indigo-500"
+                      : latestStatus.toLowerCase() === "failed" ||
+                          latestStatus.toLowerCase() === "error"
+                        ? "bg-red-500"
+                        : "bg-indigo-500"
                   }`}
                 />
-
                 {latestStatus}
               </span>
             ) : (
-              <span className="text-sm text-slate-400">
-                —
-              </span>
+              <span className="text-sm text-slate-400">—</span>
             )}
           </div>
-
-          <div className="metric-description">
-            Most recent audit
-          </div>
+          <div className="metric-description">Most recent audit</div>
         </div>
       </div>
 
       {/* =====================================================
           Audit History Panel
-          ===================================================== */}
+      ===================================================== */}
 
       <section className="stripe-panel overflow-hidden">
-        {/* Panel Header */}
-
         <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-5 sm:flex-row sm:items-center sm:justify-between lg:px-6">
           <div>
-            <div className="eyebrow mb-1">
-              Audit activity
-            </div>
-
-            <h3 className="section-title">
-              Previous audits
-            </h3>
-
+            <div className="eyebrow mb-1">Audit activity</div>
+            <h3 className="section-title">Previous audits</h3>
             <p className="section-description">
-              Compare scores, page coverage, and issues
-              across previous audit runs.
+              Compare scores, page coverage, and issues across
+              previous audit runs.
             </p>
           </div>
 
           {totalAudits > 0 && (
             <div className="stripe-badge stripe-badge-neutral self-start">
-              {totalAudits}{" "}
-              {totalAudits === 1 ? "audit" : "audits"}
+              {totalAudits} {totalAudits === 1 ? "audit" : "audits"}
             </div>
           )}
         </div>
-
-        {/* Empty state */}
 
         {data.history.length === 0 ? (
           <div className="empty-state border-0 rounded-none">
             <div className="empty-state-icon">
               <i className="bi bi-search" />
             </div>
-
-            <div className="empty-state-title">
-              No audits yet
-            </div>
-
+            <div className="empty-state-title">No audits yet</div>
             <p className="empty-state-description">
-              Run your first audit to start building your
-              SEO history and track improvements over time.
+              {isOwner
+                ? "Run your first audit to start building your SEO history and track improvements over time."
+                : "No audits have been run on this project yet."}
             </p>
           </div>
         ) : (
-          /* =================================================
-             Responsive Table
-             ================================================= */
-
           <div className="overflow-x-auto">
             <table className="stripe-table min-w-[900px]">
               <thead>
                 <tr>
-                  <th className="pl-5 lg:pl-6">
-                    Audit
-                  </th>
-
+                  <th className="pl-5 lg:pl-6">Audit</th>
                   <th>Score</th>
-
                   <th>Change</th>
-
                   <th>Pages</th>
-
                   <th>Issues</th>
-
                   <th>Status</th>
-
-                  <th className="pr-5 text-right lg:pr-6">
-                    Action
-                  </th>
+                  <th className="pr-5 text-right lg:pr-6">Action</th>
                 </tr>
               </thead>
 
@@ -484,32 +394,21 @@ export default function ProjectAuditHistory({
 
                   return (
                     <tr key={audit.id}>
-                      {/* Audit */}
-
                       <td className="pl-5 lg:pl-6">
                         <div className="flex min-w-[250px] items-start gap-3">
                           <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-50 text-slate-500">
                             <i className="bi bi-file-earmark-bar-graph text-sm" />
                           </div>
-
                           <div className="min-w-0">
                             <div className="font-semibold text-slate-900">
-                              {formatDate(
-                                audit.createdAt
-                              )}
+                              {formatDate(audit.createdAt)}
                             </div>
-
-                            <div
-                              className="url-text mt-1"
-                              title={audit.url}
-                            >
+                            <div className="url-text mt-1" title={audit.url}>
                               {audit.url}
                             </div>
                           </div>
                         </div>
                       </td>
-
-                      {/* Score */}
 
                       <td>
                         <div className="flex items-center gap-2">
@@ -523,13 +422,9 @@ export default function ProjectAuditHistory({
                         </div>
                       </td>
 
-                      {/* Change */}
-
                       <td>
                         {audit.scoreChange === null ? (
-                          <span className="text-slate-400">
-                            —
-                          </span>
+                          <span className="text-slate-400">—</span>
                         ) : (
                           <div
                             className={`flex items-center gap-1.5 font-semibold ${getChangeClass(
@@ -540,71 +435,47 @@ export default function ProjectAuditHistory({
                               className={`bi ${
                                 audit.scoreChange > 0
                                   ? "bi-arrow-up"
-                                  : audit.scoreChange <
-                                    0
-                                  ? "bi-arrow-down"
-                                  : "bi-dash"
+                                  : audit.scoreChange < 0
+                                    ? "bi-arrow-down"
+                                    : "bi-dash"
                               }`}
                             />
-
-                            {formatChange(
-                              audit.scoreChange
-                            )}
+                            {formatChange(audit.scoreChange)}
                           </div>
                         )}
                       </td>
-
-                      {/* Pages */}
 
                       <td>
                         <div className="flex items-center gap-2">
                           <span className="font-semibold text-slate-800">
                             {audit.pagesCrawled ?? 0}
                           </span>
-
                           {audit.pagesPassed !== null &&
-                            audit.pagesCrawled !==
-                              null &&
+                            audit.pagesCrawled !== null &&
                             audit.pagesCrawled > 0 && (
                               <span className="text-xs text-slate-400">
-                                /
-                                {audit.pagesPassed}
-                                {" "}passed
+                                /{audit.pagesPassed} passed
                               </span>
                             )}
                         </div>
                       </td>
 
-                      {/* Issues */}
-
                       <td>
                         <div className="flex flex-col gap-1">
                           <div className="flex items-center gap-2 text-xs">
                             <span className="font-semibold text-red-600">
-                              {audit.pagesWithErrors ??
-                                0}{" "}
-                              errors
+                              {audit.pagesWithErrors ?? 0} errors
                             </span>
-
-                            <span className="text-slate-300">
-                              ·
-                            </span>
-
+                            <span className="text-slate-300">·</span>
                             <span className="font-semibold text-amber-600">
-                              {audit.pagesWithWarnings ??
-                                0}{" "}
-                              warnings
+                              {audit.pagesWithWarnings ?? 0} warnings
                             </span>
                           </div>
-
                           <span className="text-xs text-slate-400">
-                            {issueCount} total affected
-                            pages
+                            {issueCount} total affected pages
                           </span>
                         </div>
                       </td>
-
-                      {/* Status */}
 
                       <td>
                         <span
@@ -614,25 +485,18 @@ export default function ProjectAuditHistory({
                         >
                           <span
                             className={`h-1.5 w-1.5 rounded-full ${
-                              audit.status.toLowerCase() ===
-                                "completed" ||
-                              audit.status.toLowerCase() ===
-                                "complete"
+                              audit.status.toLowerCase() === "completed" ||
+                              audit.status.toLowerCase() === "complete"
                                 ? "bg-emerald-500"
-                                : audit.status.toLowerCase() ===
-                                      "failed" ||
-                                    audit.status.toLowerCase() ===
-                                      "error"
-                                ? "bg-red-500"
-                                : "bg-indigo-500"
+                                : audit.status.toLowerCase() === "failed" ||
+                                    audit.status.toLowerCase() === "error"
+                                  ? "bg-red-500"
+                                  : "bg-indigo-500"
                             }`}
                           />
-
                           {audit.status}
                         </span>
                       </td>
-
-                      {/* Action */}
 
                       <td className="pr-5 text-right lg:pr-6">
                         <Link
@@ -640,7 +504,6 @@ export default function ProjectAuditHistory({
                           className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
                         >
                           View report
-
                           <i className="bi bi-arrow-up-right text-[11px]" />
                         </Link>
                       </td>
@@ -655,60 +518,56 @@ export default function ProjectAuditHistory({
 
       {/* =====================================================
           Footer information
-          ===================================================== */}
+      ===================================================== */}
 
       {data.history.length > 0 && (
         <div className="flex flex-col gap-2 border-t border-slate-200 pt-4 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
           <span>
             Showing {data.history.length}{" "}
-            {data.history.length === 1
-              ? "audit"
-              : "audits"}{" "}
-            for {data.project.domain}
+            {data.history.length === 1 ? "audit" : "audits"} for{" "}
+            {data.project.domain}
           </span>
-
           {latestAudit?.createdAt && (
-            <span>
-              Latest audit:{" "}
-              {formatDate(latestAudit.createdAt)}
-            </span>
+            <span>Latest audit: {formatDate(latestAudit.createdAt)}</span>
           )}
         </div>
       )}
-      
+
       {/* =====================================================
-          Danger zone — Delete project
-          ===================================================== */}
+          Danger zone — Delete project (OWNER ONLY)
+      ===================================================== */}
 
-      <section className="stripe-panel border-red-200">
-        <div className="flex flex-col gap-5 px-5 py-5 sm:flex-row sm:items-center sm:justify-between lg:px-6">
-          <div>
-            <h3
-              className="section-title"
-              style={{ color: "var(--danger, #dc2626)" }}
-            >
-              Danger zone
-            </h3>
+      {isOwner && (
+        <section className="stripe-panel border-red-200">
+          <div className="flex flex-col gap-5 px-5 py-5 sm:flex-row sm:items-center sm:justify-between lg:px-6">
+            <div>
+              <h3
+                className="section-title"
+                style={{ color: "var(--danger, #dc2626)" }}
+              >
+                Danger zone
+              </h3>
 
-            <p className="section-description">
-              Deleting this project will permanently remove it
-              and all{" "}
-              <strong className="text-slate-700">
-                {totalAudits}{" "}
-                {totalAudits === 1 ? "audit" : "audits"}
-              </strong>{" "}
-              associated with it. This action cannot be undone.
-            </p>
+              <p className="section-description">
+                Deleting this project will permanently remove it and
+                all{" "}
+                <strong className="text-slate-700">
+                  {totalAudits}{" "}
+                  {totalAudits === 1 ? "audit" : "audits"}
+                </strong>{" "}
+                associated with it. This action cannot be undone.
+              </p>
+            </div>
+
+            <DeleteProjectButton
+              projectId={data.project.id}
+              projectName={data.project.name}
+              projectDomain={data.project.domain}
+              auditCount={totalAudits}
+            />
           </div>
-
-          <DeleteProjectButton
-            projectId={data.project.id}
-            projectName={data.project.name}
-            projectDomain={data.project.domain}
-            auditCount={totalAudits}
-          />
-        </div>
-      </section>
+        </section>
+      )}
     </div>
   );
 }

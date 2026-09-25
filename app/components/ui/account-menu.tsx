@@ -84,13 +84,6 @@ export default function AccountMenu({
     "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-slate-700 transition hover:bg-slate-50";
 
   return (
-    /*
-     * The outer wrapper groups the bell and the account menu
-     * button so they sit side-by-side with consistent spacing.
-     * It's NOT the click-outside target — each child has its
-     * own ref and its own handler, so opening one doesn't close
-     * the other.
-     */
     <div className="flex items-center gap-2">
       {/* ---------- Notifications ---------- */}
       <NotificationBell />
@@ -182,6 +175,17 @@ export default function AccountMenu({
                 <span>Projects</span>
               </Link>
 
+              {/* 👇 NEW */}
+              <Link
+                href="/dashboard/team"
+                onClick={() => setOpen(false)}
+                className={itemClass}
+                role="menuitem"
+              >
+                <i className="bi bi-people w-5 text-center text-slate-500" />
+                <span>Team</span>
+              </Link>
+
               <Link
                 href="/dashboard/audits"
                 onClick={() => setOpen(false)}
@@ -223,23 +227,23 @@ export default function AccountMenu({
               </Link>
 
               <Link
-                  href="/dashboard/settings/activity"
-                  onClick={() => setOpen(false)}
-                  className={itemClass}
-                  role="menuitem"
-                >
-                  <i className="bi bi-clock-history w-5 text-center text-slate-500" />
-                  <span>Recent activity </span>
+                href="/dashboard/settings/activity"
+                onClick={() => setOpen(false)}
+                className={itemClass}
+                role="menuitem"
+              >
+                <i className="bi bi-clock-history w-5 text-center text-slate-500" />
+                <span>Recent activity</span>
               </Link>
 
               <Link
-                  href="/dashboard/support"
-                  onClick={() => setOpen(false)}
-                  className={itemClass}
-                  role="menuitem"
-                >
-                  <i className="bi bi-question-circle w-5 text-center text-slate-500" />
-                  <span>Support </span>
+                href="/dashboard/support"
+                onClick={() => setOpen(false)}
+                className={itemClass}
+                role="menuitem"
+              >
+                <i className="bi bi-question-circle w-5 text-center text-slate-500" />
+                <span>Support</span>
               </Link>
             </div>
 
