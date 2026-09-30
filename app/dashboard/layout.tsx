@@ -25,7 +25,7 @@ export default async function DashboardLayout({
       <aside className="dashboard-sidebar hidden lg:flex lg:flex-col">
         {/* Brand */}
         <div
-          className="flex items-center px-5"
+          className="flex shrink-0 items-center px-5"
           style={{ height: "var(--header-height)" }}
         >
           <Link
@@ -37,8 +37,11 @@ export default async function DashboardLayout({
           </Link>
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 px-3 py-4">
+        {/* Navigation — scrollable if content overflows */}
+        <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4">
+          {/* ---------- Workspace ---------- */}
+          <SectionLabel>Workspace</SectionLabel>
+
           <NavLink href="/dashboard" icon={<DashboardIcon />}>
             Dashboard
           </NavLink>
@@ -47,7 +50,6 @@ export default async function DashboardLayout({
             Projects
           </NavLink>
 
-          {/* 👇 NEW */}
           <NavLink href="/dashboard/team" icon={<TeamIcon />}>
             Team
           </NavLink>
@@ -55,6 +57,9 @@ export default async function DashboardLayout({
           <NavLink href="/dashboard/audits" icon={<SearchIcon />}>
             Audits
           </NavLink>
+
+          {/* ---------- Account ---------- */}
+          <SectionLabel className="mt-3">Account</SectionLabel>
 
           <NavLink href="/dashboard/subscription" icon={<CardIcon />}>
             Subscription
@@ -68,21 +73,28 @@ export default async function DashboardLayout({
             Settings
           </NavLink>
 
-          <NavLink href="/dashboard/settings/activity" icon={<ActivityIcon />}>
-            Recent activity
-          </NavLink>
+          {/* ---------- Support ---------- */}
+          <SectionLabel className="mt-3">Support</SectionLabel>
 
           <NavLink href="/dashboard/support" icon={<HelpIcon />}>
-            Support
+            Support tickets
           </NavLink>
+
           <NavLink href="/dashboard/contact" icon={<MessageIcon />}>
-            My messages
+            Contact messages
+          </NavLink>
+
+          <NavLink
+            href="/dashboard/settings/activity"
+            icon={<ActivityIcon />}
+          >
+            Recent activity
           </NavLink>
         </nav>
 
         {/* ---------- SIDEBAR FOOTER: user + logout ---------- */}
         <div
-          className="border-t px-3 py-4"
+          className="shrink-0 border-t px-3 py-4"
           style={{ borderColor: "var(--border)" }}
         >
           <div className="mb-3 px-2">
@@ -131,6 +143,27 @@ export default async function DashboardLayout({
         {/* ---------- PAGE CONTENT ---------- */}
         <main className="dashboard-content">{children}</main>
       </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   SECTION LABEL
+========================================================= */
+
+function SectionLabel({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider ${className}`}
+      style={{ color: "var(--text-muted)" }}
+    >
+      {children}
     </div>
   );
 }
