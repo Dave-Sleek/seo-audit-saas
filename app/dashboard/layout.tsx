@@ -33,7 +33,8 @@ export default async function DashboardLayout({
             className="text-base font-bold tracking-tight"
             style={{ color: "var(--text-primary)" }}
           >
-            NARANIO
+            INSIDE
+            <span style={{ color: "var(--primary)" }}>CRAWL</span>
           </Link>
         </div>
 
@@ -128,7 +129,8 @@ export default async function DashboardLayout({
               className="text-sm font-bold tracking-tight lg:hidden"
               style={{ color: "var(--text-primary)" }}
             >
-              NARANIO
+              INSIDE
+              <span style={{ color: "var(--primary)" }}>CRAWL</span>
             </Link>
           </div>
 
