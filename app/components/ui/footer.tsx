@@ -12,11 +12,11 @@ export default function Footer() {
               className="inline-flex items-center gap-2"
             >
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white text-sm font-bold text-slate-950">
-                N
+                IC
               </div>
 
               <span className="text-xl font-bold text-white">
-                NARA<span className="text-orange-400">NIO</span>
+                INSIDE<span className="text-orange-400">CRAWL</span>
               </span>
             </Link>
 

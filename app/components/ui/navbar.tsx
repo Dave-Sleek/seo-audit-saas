@@ -143,15 +143,15 @@ export default function Navbar() {
                 "linear-gradient(135deg, #f97316 0%, #ea580c 100%)",
             }}
           >
-            N
+            IC
           </div>
 
           <span
             className="text-xl font-bold tracking-tight"
             style={{ color: "var(--text-primary)" }}
           >
-            NARA
-            <span style={{ color: "var(--primary)" }}>NIO</span>
+            INSIDE
+            <span style={{ color: "var(--primary)" }}>CRAWL</span>
           </span>
         </Link>
 

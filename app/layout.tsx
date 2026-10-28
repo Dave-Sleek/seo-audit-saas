@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Naranio",
+  title: "InsideCrawl",
   description: "SEO analysis and monitoring",
 };
 
