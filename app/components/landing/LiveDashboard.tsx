@@ -49,7 +49,7 @@ export default function LiveDashboard() {
     rootMargin: "0px",
   });
 
-  const typed = useTypewriter("https://naranio.com", {
+  const typed = useTypewriter("https://insidecrawl.com", {
     speed: 60,
     startDelay: 300,
     enabled: inView,
@@ -65,7 +65,7 @@ export default function LiveDashboard() {
     if (!inView) return;
 
     // Wait for the typewriter to finish.
-    const startDelay = 300 + "https://naranio.com".length * 60 + 400;
+    const startDelay = 300 + "https://insidecrawl.com".length * 60 + 400;
 
     const timers: ReturnType<typeof setTimeout>[] = [];
 
